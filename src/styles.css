@@ -3,6 +3,12 @@
 
 @custom-variant dark (&:is(.dark *));
 
+
+
+@utility safe-top {
+  padding-top: calc(env(safe-area-inset-top, 0px));
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -120,4 +126,6 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  html { font-size: 16px; } /* makes all rem-based sizes bigger */
 }

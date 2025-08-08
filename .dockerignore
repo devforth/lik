@@ -1,0 +1,31 @@
+# Dependencies
+node_modules
+npm-debug.log*
+
+# Build outputs
+dist
+dist-android
+
+# Android build files
+android/app/build
+android/build
+android/.gradle
+android/capacitor-cordova-android-plugins/build
+
+# IDE files
+.vscode
+.idea
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Other
+*.log
+*.tmp
+.env.local
+.env.*.local

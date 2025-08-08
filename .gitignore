@@ -14,6 +14,8 @@ dist-ssr
 coverage
 *.local
 
+dist-android
+
 /cypress/videos/
 /cypress/screenshots/
 

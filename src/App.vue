@@ -1,43 +1,44 @@
 
 
 <template>
-  <SidebarProvider>
-    <Sidebar>
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <DropdownMenuRoot>
-              <DropdownMenuTrigger asChild>
-                  <SidebarMenuButton>
-                    Select Workspace
-                    <ChevronDown class="ml-auto" />
+  <div class="safe-top">
+    <SidebarProvider>
+      <Sidebar>
+        <SidebarHeader>
+          
+        </SidebarHeader>
+
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>
+              Scoreboards
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem v-for="w in workspaces" :key="w.name">
+                  <SidebarMenuButton asChild>
+                    <a :href="w.url">
+                      <span>{{w.name}}</span>
+                    </a>
                   </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent class="w-[--bits-dropdown-menu-anchor-width]">
-                <DropdownMenuItem>
-                  <span> 💥Acme Inc</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <span>Acme Corp.</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenuRoot>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+
+            <Button class="mt-4" @click="createNewScoreboard">New scoreboard</Button>
 
 
-      <SidebarContent>
-        <SidebarGroup />
-        <SidebarGroup />
-      </SidebarContent>
-      <SidebarFooter />
-    </Sidebar>
-    <main>
-      <SidebarTrigger />
-      <RouterView />
-    </main>
-  </SidebarProvider>
+          </SidebarGroup>
+          <SidebarGroup />
+        </SidebarContent>
+        <SidebarFooter />
+      </Sidebar>
+      <main>
+        <SidebarTrigger />
+        <RouterView />
+      </main>
+    </SidebarProvider>
+  </div>
 </template>
 
 <style scoped></style>
@@ -45,7 +46,13 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button'
 import Sidebar from '@/components/ui/sidebar/Sidebar.vue'
-import { SidebarContent, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui';
-import { ChevronDown } from 'lucide-vue-next';
+
+
+const workspaces = [
+  {name: "Workspace 1"},
+  {name: "Workspace 2"},
+  {name: "Workspace 3"}
+]
 </script>
