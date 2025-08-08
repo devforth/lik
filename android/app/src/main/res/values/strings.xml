@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Lik</string>
+    <string name="title_activity_main">Lik</string>
+    <string name="package_name">io.devforth.lik</string>
+    <string name="custom_url_scheme">io.devforth.lik</string>
+</resources>
