@@ -21,16 +21,20 @@ import { ref } from 'vue'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { useRouter } from 'vue-router'
 
 const name = ref('')
 const scoreboards = useScoreboardsStore()
+const router = useRouter()
 
 function onCreate() {
   const trimmed = name.value.trim()
   if (!trimmed) return
   const created = scoreboards.addScoreboard(trimmed)
   console.log('Create Scoreboard:', created)
-  // Optionally clear input or navigate later
+  name.value = ''
+  // Navigate to the newly created scoreboard
+  router.push({ name: 'scoreboard', params: { id: created.id } })
 }
 </script>
 
