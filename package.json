@@ -23,6 +23,7 @@
     "konsta": "^4.0.1",
     "lucide-vue-next": "^0.539.0",
     "pinia": "^3.0.3",
+    "qrcode.vue": "^3.6.0",
     "reka-ui": "^2.4.1",
     "tailwind-merge": "^3.3.1",
     "tailwindcss": "^4.1.11",
