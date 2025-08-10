@@ -1,0 +1,133 @@
+import { ref, watch } from 'vue'
+import { defineStore } from 'pinia'
+import { nowUtc } from '@/time-sync'
+
+export interface Scoreboard {
+  id: string
+  name: string
+  createdAt: number
+}
+
+export const useScoreboardsStore = defineStore('scoreboards', () => {
+  const items = ref<Scoreboard[]>([])
+  // internal: indicates hydration in progress to avoid write loops
+  let hydrating = false
+
+  // IndexedDB helpers (lazy)
+  const DB_NAME = 'appdb'
+  const DB_VERSION = 1
+  const STORE = 'scoreboards'
+  let idb: IDBDatabase | null = null
+
+  function openIdb(name: string, version: number): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(name, version)
+      req.onupgradeneeded = () => {
+        const db = req.result
+        if (!db.objectStoreNames.contains(STORE)) {
+          db.createObjectStore(STORE, { keyPath: 'id' })
+        }
+      }
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+  }
+
+  async function ensureDb(): Promise<IDBDatabase | null> {
+    if (idb) return idb
+    try {
+      idb = await openIdb(DB_NAME, DB_VERSION)
+      return idb
+    } catch (e) {
+      console.warn('[scoreboards] IndexedDB unavailable, persistence disabled', e)
+      return null
+    }
+  }
+
+  async function loadAll(): Promise<Scoreboard[] | null> {
+    const db = await ensureDb()
+    if (!db) return null
+    try {
+      const tx = db.transaction(STORE, 'readonly')
+      const store = tx.objectStore(STORE)
+      const values: any[] = await new Promise((resolve, reject) => {
+        const req = store.getAll()
+        req.onsuccess = () => resolve(req.result as any[])
+        req.onerror = () => reject(req.error)
+      })
+      // ensure createdAt is a number and sort asc
+      return values
+        .map((v) => ({ id: String(v.id), name: String(v.name), createdAt: Number(v.createdAt) }))
+        .sort((a, b) => a.createdAt - b.createdAt)
+    } catch (e) {
+      console.warn('[scoreboards] loadAll failed', e)
+      return null
+    }
+  }
+
+  async function saveAll(list: Scoreboard[]) {
+    const db = await ensureDb()
+    if (!db) return
+    try {
+      const tx = db.transaction(STORE, 'readwrite')
+      const store = tx.objectStore(STORE)
+      for (const sb of list) {
+        store.put({ id: sb.id, name: sb.name, createdAt: sb.createdAt })
+      }
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+        tx.onabort = () => reject(tx.error)
+      })
+    } catch (e) {
+      console.warn('[scoreboards] saveAll failed', e)
+    }
+  }
+
+  function addScoreboard(name: string): Scoreboard {
+  const id = crypto.randomUUID()
+
+    const sb: Scoreboard = {
+      id,
+      name,
+      createdAt: nowUtc(),
+    }
+    items.value.push(sb)
+    // persist eagerly for immediate durability
+    // (watcher also persists, but this speeds up single-add cases)
+    void saveAll(items.value)
+    return sb
+  }
+
+  // hydrate from IndexedDB on first use
+  ;(async () => {
+    hydrating = true
+    try {
+      const rows = await loadAll()
+      if (rows && rows.length) {
+        items.value = rows
+      }
+    } finally {
+      hydrating = false
+    }
+  })()
+
+  // persist on any change (debounced)
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  watch(
+    items,
+    (list) => {
+      if (hydrating) return
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => {
+        void saveAll(list)
+      }, 200)
+    },
+    { deep: true }
+  )
+
+  return {
+    items,
+    addScoreboard,
+  }
+})

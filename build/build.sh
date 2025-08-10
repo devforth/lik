@@ -16,10 +16,10 @@ echo "📦 Extracting APK..."
 mkdir -p "$OUT_DIR"
 CID=$(docker create "$IMAGE_NAME")
 
-# Стандартний шлях для debug APK
+# Standard path for debug APK
 docker cp "$CID":/workspace/android/app/build/outputs/apk/debug/. "$OUT_DIR" 2>/dev/null || true
 
-# Фолбек: витягнути будь-які *.apk з android/
+# Fallback: extract any *.apk from android/
 if ! ls "$OUT_DIR"/*.apk >/dev/null 2>&1; then
   echo "🔎 Fallback: search for APKs..."
   docker cp "$CID":/workspace/android /tmp/_android_copy

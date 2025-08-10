@@ -15,11 +15,9 @@
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <SidebarMenuItem v-for="w in workspaces" :key="w.name">
-                  <SidebarMenuButton asChild>
-                    <a :href="w.url">
-                      <span>{{w.name}}</span>
-                    </a>
+                <SidebarMenuItem v-for="sb in scoreboards" :key="sb.id">
+                  <SidebarMenuButton asChild @click="goToScoreboard(sb.id)">
+                    <span>{{ sb.name }}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -33,7 +31,7 @@
         </SidebarContent>
         <SidebarFooter />
       </Sidebar>
-      <main>
+      <main class="w-full">
         <SidebarTrigger />
         <RouterView />
       </main>
@@ -47,12 +45,20 @@
 import { Button } from '@/components/ui/button'
 import Sidebar from '@/components/ui/sidebar/Sidebar.vue'
 import { SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
-import { DropdownMenuContent, DropdownMenuItem, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui';
+import { useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
+import { useScoreboardsStore } from '@/stores/scoreboards'
 
 
-const workspaces = [
-  {name: "Workspace 1"},
-  {name: "Workspace 2"},
-  {name: "Workspace 3"}
-]
+const scoreboardsStore = useScoreboardsStore()
+const { items: scoreboards } = storeToRefs(scoreboardsStore)
+
+const router = useRouter()
+function createNewScoreboard() {
+  router.push({ name: 'new-scoreboard' })
+}
+
+function goToScoreboard(id: string) {
+  router.push({ name: 'scoreboard', params: { id } })
+}
 </script>
