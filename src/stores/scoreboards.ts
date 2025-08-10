@@ -99,6 +99,32 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     return sb
   }
 
+  async function deleteScoreboard(id: string): Promise<boolean> {
+    const idx = items.value.findIndex((s) => s.id === id)
+    if (idx === -1) return false
+
+    // remove from in-memory list first for immediate UI feedback
+    items.value.splice(idx, 1)
+
+    // delete persisted record as well
+    try {
+      const db = await ensureDb()
+      if (!db) return true
+      const tx = db.transaction(STORE, 'readwrite')
+      const store = tx.objectStore(STORE)
+      store.delete(id)
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+        tx.onabort = () => reject(tx.error)
+      })
+    } catch (e) {
+      console.warn('[scoreboards] delete failed', e)
+    }
+
+    return true
+  }
+
   // hydrate from IndexedDB on first use
   ;(async () => {
     hydrating = true
@@ -129,5 +155,6 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   return {
     items,
     addScoreboard,
+  deleteScoreboard,
   }
 })
