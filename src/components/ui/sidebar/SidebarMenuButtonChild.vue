@@ -5,6 +5,7 @@ import type { SidebarMenuButtonVariants } from "."
 import { Primitive } from "reka-ui"
 import { cn } from "@/lib/utils"
 import { sidebarMenuButtonVariants } from "."
+import { useSidebar } from "./utils"
 
 export interface SidebarMenuButtonProps extends PrimitiveProps {
   variant?: SidebarMenuButtonVariants["variant"]
@@ -18,6 +19,14 @@ const props = withDefaults(defineProps<SidebarMenuButtonProps>(), {
   variant: "default",
   size: "default",
 })
+
+// Auto-close the mobile sidebar when a menu item is clicked.
+const { isMobile, openMobile, setOpenMobile } = useSidebar()
+function handleClick() {
+  if (isMobile?.value && openMobile?.value) {
+    setOpenMobile(false)
+  }
+}
 </script>
 
 <template>
@@ -29,6 +38,7 @@ const props = withDefaults(defineProps<SidebarMenuButtonProps>(), {
     :class="cn(sidebarMenuButtonVariants({ variant, size }), props.class)"
     :as="as"
     :as-child="asChild"
+    @click="handleClick"
     v-bind="$attrs"
   >
     <slot />

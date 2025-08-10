@@ -23,7 +23,9 @@
               </SidebarMenu>
             </SidebarGroupContent>
 
-            <Button class="mt-4" @click="createNewScoreboard">New scoreboard</Button>
+            <CloseMobileSidebar>
+              <Button class="mt-4" @click="createNewScoreboard">New scoreboard</Button>
+            </CloseMobileSidebar>
 
 
           </SidebarGroup>
@@ -45,6 +47,7 @@
 import { Button } from '@/components/ui/button'
 import Sidebar from '@/components/ui/sidebar/Sidebar.vue'
 import { SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import CloseMobileSidebar from '@/components/CloseMobileSidebar.vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useScoreboardsStore } from '@/stores/scoreboards'
