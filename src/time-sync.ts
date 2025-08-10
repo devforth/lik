@@ -1,52 +1,78 @@
 // time-sync.ts
-let offset = 0;
+// A single, reliable UTC time source with background sync and caching.
+
+type Snapshot = {
+  serverEpochMs: number; // server UTC at the moment of measurement
+  localEpochMs: number;  // local time at the moment of measurement
+};
+
+const CACHE_KEY = 'timeSync:snapshot:v1';
+let snapshot: Snapshot | null = null;
+let syncing = false;
+
+function loadSnapshot() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Snapshot;
+    if (
+      parsed &&
+      typeof parsed.serverEpochMs === 'number' &&
+      typeof parsed.localEpochMs === 'number'
+    ) {
+      snapshot = parsed;
+    }
+  } catch {}
+}
+
+function saveSnapshot(s: Snapshot) {
+  snapshot = s;
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(s));
+  } catch {}
+}
 
 async function syncTime() {
+  if (syncing) return;
+  syncing = true;
   try {
     const t0 = Date.now();
-    const res = await fetch('http://worldtimeapi.org/api/ip'); // HTTPS in production
-
-    // example response
-// {
-//   "utc_offset": "+03:00",
-//   "timezone": "Europe/Kyiv",
-//   "day_of_week": 6,
-//   "day_of_year": 221,
-//   "datetime": "2025-08-09T00:25:58.894578+03:00",
-//   "utc_datetime": "2025-08-08T21:25:58.894578+00:00",
-//   "unixtime": 1754688358,
-//   "raw_offset": 7200,
-//   "week_number": 32,
-//   "dst": true,
-//   "abbreviation": "EEST",
-//   "dst_offset": 3600,
-//   "dst_from": "2025-03-30T01:00:00+00:00",
-//   "dst_until": "2025-10-26T01:00:00+00:00",
-//   "client_ip": "91.225.199.55"
-// }
+    // Prefer HTTPS to avoid mixed-content/CORS/cleartext issues (Android WebView blocks HTTP by default)
+    // Use the stable UTC timezone endpoint.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
+    let res: Response;
+    try {
+      res = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC', { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!res.ok) throw new Error(`Time API error: HTTP ${res.status}`);
 
     const t1 = Date.now();
     const data = await res.json();
-
     // Adjust for half the round-trip delay
     const serverTime = new Date(data.utc_datetime).getTime() + (t1 - t0) / 2;
-    offset = serverTime - t1;
+    saveSnapshot({ serverEpochMs: serverTime, localEpochMs: t1 });
   } catch (err) {
+    // Keep previous snapshot if available
     console.warn('Time sync failed', err);
+  } finally {
+    syncing = false;
   }
 }
 
-export function now() {
-  return Date.now() + offset;
-}
+// Kick off initial load + periodic refresh without exporting any init API
+loadSnapshot();
+void syncTime();
+setInterval(syncTime, 5 * 60 * 1000); // refresh every 5 min
 
-// Returns the synchronized current time in UTC (milliseconds since epoch).
-// Equivalent to now(), provided for clarity at call sites that require UTC.
-export function nowUtc() {
-  return Date.now() + offset;
-}
-
-export async function initTimeSync() {
-  await syncTime();
-  setInterval(syncTime, 5 * 60 * 1000); // refresh every 5 min
+// Returns synchronized current time in UTC (ms since epoch). If no snapshot yet,
+// falls back to local clock (best effort) until sync completes.
+export function nowUtc(): number {
+  if (snapshot) {
+    const delta = Date.now() - snapshot.localEpochMs;
+    return snapshot.serverEpochMs + delta;
+  }
+  return Date.now();
 }

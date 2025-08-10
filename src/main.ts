@@ -3,9 +3,6 @@ import { createPinia } from 'pinia'
 
 import App from './App.vue'
 import router from './router'
-import { initTimeSync } from './time-sync';
-
-initTimeSync();
 
 
 import '@/styles.css'
