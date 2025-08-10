@@ -64,7 +64,7 @@
             <QrcodeVue :value="boardId" :size="192" level="M" class="rounded-md border p-2 bg-card" />
 
             <div class="w-full flex items-center gap-2">
-              <Input :model-value="boardId" readonly class="font-mono" />
+              <Input :model-value="boardId" readonly class="font-mono text-sm" />
               <Button variant="outline" size="icon" @click="copyBoardId" :aria-label="copied ? 'Copied' : 'Copy'">
                 <component :is="copied ? Check : Copy" class="h-4 w-4" />
               </Button>

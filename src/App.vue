@@ -25,6 +25,7 @@
 
             <CloseMobileSidebar>
               <Button class="mt-4" @click="createNewScoreboard">New scoreboard</Button>
+              <Button class="mt-2" variant="outline" @click="joinBoard">Join the board</Button>
             </CloseMobileSidebar>
 
 
@@ -36,6 +37,8 @@
       <main class="w-full">
         <SidebarTrigger />
         <RouterView />
+  <!-- Sonner toaster -->
+  <Toaster class="pointer-events-auto" />
       </main>
     </SidebarProvider>
   </div>
@@ -51,6 +54,8 @@ import CloseMobileSidebar from '@/components/CloseMobileSidebar.vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useScoreboardsStore } from '@/stores/scoreboards'
+import { Toaster } from '@/components/ui/sonner'
+import 'vue-sonner/style.css'
 
 
 const scoreboardsStore = useScoreboardsStore()
@@ -63,5 +68,9 @@ function createNewScoreboard() {
 
 function goToScoreboard(id: string) {
   router.push({ name: 'scoreboard', params: { id } })
+}
+
+function joinBoard() {
+  router.push({ name: 'join-board' })
 }
 </script>
