@@ -163,6 +163,16 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  async function updateNickname(newName: string) {
+    const n = (newName ?? '').trim()
+    if (!profile.value) await ensureUser()
+    if (!profile.value) return
+    if (!n) return
+    if (profile.value.nickname === n) return
+    profile.value.nickname = n
+    await saveProfile(profile.value)
+  }
+
   function getPubKey(): string | null { return pubkey.value }
   function getPrivKey(): string | null { return privkey.value }
 
@@ -182,5 +192,6 @@ export const useUserStore = defineStore('user', () => {
   getPubKey,
   getPrivKey,
   regenerateAvatarSeed,
+  updateNickname,
   }
 })
