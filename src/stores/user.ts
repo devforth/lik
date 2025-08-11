@@ -1,10 +1,11 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { uniqueNamesGenerator, adjectives, animals, colors } from 'unique-names-generator'
 import { bytesToHex } from 'nostr-tools/utils'
 import { generateSecretKey, getPublicKey } from 'nostr-tools'
 import { createAvatar } from '@dicebear/core'
 import { thumbs } from '@dicebear/collection'
+import { publishProfile as nostrPublishProfile } from '@/nostr'
 
 export interface UserProfile {
   id: string // same as pubkey for convenience
@@ -130,6 +131,12 @@ export const useUserStore = defineStore('user', () => {
     }
     profile.value = p
     await saveProfile(p)
+    // Immediately publish new profile to Nostr
+    try {
+      await publishProfileToNostr()
+    } catch (e) {
+      console.warn('[user] initial Nostr profile publish failed', e)
+    }
     return p
   }
 
@@ -173,6 +180,31 @@ export const useUserStore = defineStore('user', () => {
     await saveProfile(profile.value)
   }
 
+  // Publish the current profile metadata to Nostr (kind 0)
+  async function publishProfileToNostr() {
+    const p = await ensureUser()
+    // Build metadata
+    const meta = {
+      name: p.nickname,
+      picture: avatarDataUri.value,
+      about: 'LIK user',
+    }
+    await nostrPublishProfile(p.pubkeyHex, p.privkeyHex, meta)
+  }
+
+  // Auto-publish on nickname or avatarSeed change
+  watch(
+    () => [nickname.value, avatarSeed.value],
+    async () => {
+      try {
+        await publishProfileToNostr()
+      } catch (e) {
+        console.warn('[user] Nostr profile publish failed', e)
+      }
+    },
+    { deep: false }
+  )
+
   function getPubKey(): string | null { return pubkey.value }
   function getPrivKey(): string | null { return privkey.value }
 
@@ -193,5 +225,6 @@ export const useUserStore = defineStore('user', () => {
   getPrivKey,
   regenerateAvatarSeed,
   updateNickname,
+  publishProfileToNostr,
   }
 })

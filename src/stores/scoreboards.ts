@@ -1,6 +1,7 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { nowUtc } from '@/time-sync'
+import { subscribeTag } from '@/nostr'
 
 export interface Scoreboard {
   id: string
@@ -10,6 +11,8 @@ export interface Scoreboard {
 
 export const useScoreboardsStore = defineStore('scoreboards', () => {
   const items = ref<Scoreboard[]>([])
+  // nostr subscriptions cleanup map
+  const unsubById = new Map<string, () => void>()
   // internal: indicates hydration in progress to avoid write loops
   let hydrating = false
   // expose a readiness promise to let router/pages wait for initial load
@@ -91,7 +94,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   }
 
   function addScoreboard(name: string): Scoreboard {
-  const id = crypto.randomUUID()
+    const id = crypto.randomUUID()
 
     const sb: Scoreboard = {
       id,
@@ -102,6 +105,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     // persist eagerly for immediate durability
     // (watcher also persists, but this speeds up single-add cases)
     void saveAll(items.value)
+    // subscribe to join requests for this scoreboard
+    subscribeJoinTagFor(id)
     return sb
   }
 
@@ -138,6 +143,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       const rows = await loadAll()
       if (rows && rows.length) {
         items.value = rows
+  // subscribe for all existing
+        for (const sb of items.value) subscribeJoinTagFor(sb.id)
       }
     } finally {
       hydrating = false
@@ -158,11 +165,37 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     { deep: true }
   )
 
+  function subscribeJoinTagFor(id: string) {
+    const tag = `lik-sb-join-req-${id}`
+    // close existing if any
+    if (unsubById.has(id)) {
+      try { unsubById.get(id)!() } catch {}
+      unsubById.delete(id)
+    }
+    const unsub = subscribeTag(tag)
+    unsubById.set(id, unsub)
+  }
+
+  function startJoinSubscriptions() {
+    // ensure all current items are subscribed (idempotent)
+    for (const sb of items.value) subscribeJoinTagFor(sb.id)
+  }
+
+  function stopJoinSubscriptions() {
+    for (const [id, fn] of unsubById.entries()) {
+      try { fn() } catch {}
+      unsubById.delete(id)
+    }
+  }
+
   return {
     items,
     addScoreboard,
-  deleteScoreboard,
-  // allow consumers to await initial load completion
-  ensureLoaded: async () => { if (initPromise) await initPromise },
+    deleteScoreboard,
+    // allow consumers to await initial load completion
+    ensureLoaded: async () => { if (initPromise) await initPromise },
+    // nostr helpers
+    startJoinSubscriptions,
+    stopJoinSubscriptions,
   }
 })
