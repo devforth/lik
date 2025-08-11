@@ -2,11 +2,13 @@ import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { nowUtc } from '@/time-sync'
 import { subscribeTag } from '@/nostr'
+import { useUserStore } from '@/stores/user'
 
 export interface Scoreboard {
   id: string
   name: string
   createdAt: number
+  authorPubKey: string
 }
 
 export const useScoreboardsStore = defineStore('scoreboards', () => {
@@ -66,7 +68,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       })
       // ensure createdAt is a number and sort asc
       return values
-        .map((v) => ({ id: String(v.id), name: String(v.name), createdAt: Number(v.createdAt) }))
+        .map((v) => ({ id: String(v.id), name: String(v.name), createdAt: Number(v.createdAt), authorPubKey: String(v.authorPubKey || '') }))
         .sort((a, b) => a.createdAt - b.createdAt)
     } catch (e) {
       console.warn('[scoreboards] loadAll failed', e)
@@ -81,7 +83,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       const tx = db.transaction(STORE, 'readwrite')
       const store = tx.objectStore(STORE)
       for (const sb of list) {
-        store.put({ id: sb.id, name: sb.name, createdAt: sb.createdAt })
+        store.put({ id: sb.id, name: sb.name, createdAt: sb.createdAt, authorPubKey: sb.authorPubKey })
       }
       await new Promise<void>((resolve, reject) => {
         tx.oncomplete = () => resolve()
@@ -95,11 +97,14 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
 
   function addScoreboard(name: string): Scoreboard {
     const id = crypto.randomUUID()
+    const user = useUserStore()
+    const authorPubKey = user.getPubKey() || ''
 
     const sb: Scoreboard = {
       id,
       name,
       createdAt: nowUtc(),
+      authorPubKey,
     }
     items.value.push(sb)
     // persist eagerly for immediate durability
