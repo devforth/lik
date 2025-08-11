@@ -43,9 +43,9 @@
           <SidebarMenu>
             <SidebarMenuItem>
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+                <DropdownMenuTrigger class="pl-0 pr-0" asChild>
                   <SidebarMenuButton>
-                    <User2 /> {{ displayName }}
+                    <img :src="avatar" alt="avatar" class="size-8 rounded" /> {{ displayName }}
                     <ChevronUp class="ml-auto" />
                   </SidebarMenuButton>
                 </DropdownMenuTrigger>
@@ -68,7 +68,7 @@
         <SidebarTrigger />
         <RouterView />
   <!-- Sonner toaster -->
-  <Toaster class="pointer-events-auto" />
+        <Toaster class="pointer-events-auto" />
       </main>
     </SidebarProvider>
   </div>
@@ -89,7 +89,7 @@ import { useUserStore } from '@/stores/user'
 import { Toaster } from '@/components/ui/sonner'
 import 'vue-sonner/style.css'
 import { computed } from 'vue'
-import { User2, ChevronUp } from 'lucide-vue-next'
+import { ChevronUp } from 'lucide-vue-next'
 
 
 const scoreboardsStore = useScoreboardsStore()
@@ -97,8 +97,9 @@ const { items: scoreboards } = storeToRefs(scoreboardsStore)
 
 // user store
 const userStore = useUserStore()
-const { nickname } = storeToRefs(userStore)
+const { nickname, avatarDataUri } = storeToRefs(userStore)
 const displayName = computed(() => nickname.value || 'Anonymous')
+const avatar = avatarDataUri
 
 const router = useRouter()
 function createNewScoreboard() {

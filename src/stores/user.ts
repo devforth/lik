@@ -3,6 +3,8 @@ import { defineStore } from 'pinia'
 import { uniqueNamesGenerator, adjectives, animals, colors } from 'unique-names-generator'
 import { bytesToHex } from 'nostr-tools/utils'
 import { generateSecretKey, getPublicKey } from 'nostr-tools'
+import { createAvatar } from '@dicebear/core'
+import { thumbs } from '@dicebear/collection'
 
 export interface UserProfile {
   id: string // same as pubkey for convenience
@@ -10,6 +12,7 @@ export interface UserProfile {
   pubkeyHex: string
   privkeyHex: string
   createdAt: number
+  avatarSeed: string
 }
 
 export const useUserStore = defineStore('user', () => {
@@ -17,7 +20,7 @@ export const useUserStore = defineStore('user', () => {
 
   // IndexedDB setup
   const DB_NAME = 'appdb'
-  const DB_VERSION = 2 // bump version to add `user` store if not present
+  const DB_VERSION = 2 // adding fields on an object store doesn't require version bump
   const STORE = 'user'
   let idb: IDBDatabase | null = null
 
@@ -68,6 +71,8 @@ export const useUserStore = defineStore('user', () => {
             pubkeyHex: String(rows[0].pubkeyHex || ''),
             privkeyHex: String(rows[0].privkeyHex || ''),
             createdAt: Number(rows[0].createdAt || 0),
+            // For older records, fallback avatar seed to nickname
+            avatarSeed: String(rows[0].avatarSeed || rows[0].nickname || ''),
           }
         : null
     } catch (e) {
@@ -121,6 +126,7 @@ export const useUserStore = defineStore('user', () => {
       pubkeyHex,
       privkeyHex,
       createdAt: Date.now(),
+      avatarSeed: nickname, // default seed equals username
     }
     profile.value = p
     await saveProfile(p)
@@ -130,6 +136,32 @@ export const useUserStore = defineStore('user', () => {
   const pubkey = computed(() => profile.value?.pubkeyHex ?? null)
   const privkey = computed(() => profile.value?.privkeyHex ?? null)
   const nickname = computed(() => profile.value?.nickname ?? '')
+  const avatarSeed = computed(() => profile.value?.avatarSeed ?? '')
+
+  // Avatar helpers
+  function avatarSvg(seed?: string): string {
+    const s = seed || avatarSeed.value || nickname.value || 'user'
+    try {
+      return createAvatar(thumbs, { seed: s }).toString()
+    } catch (_) {
+      // in case something goes wrong, return a simple placeholder circle
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#eee"/><text x="50%" y="52%" dominant-baseline="middle" text-anchor="middle" font-size="20" fill="#999">🙂</text></svg>`
+    }
+  }
+
+  const avatarDataUri = computed(() => {
+    const svg = avatarSvg()
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
+  })
+
+  async function regenerateAvatarSeed() {
+    const seed = Math.random().toString(36).slice(2, 10)
+    if (!profile.value) await ensureUser()
+    if (profile.value) {
+      profile.value.avatarSeed = seed
+      await saveProfile(profile.value)
+    }
+  }
 
   function getPubKey(): string | null { return pubkey.value }
   function getPrivKey(): string | null { return privkey.value }
@@ -144,7 +176,11 @@ export const useUserStore = defineStore('user', () => {
   pubkey,
   privkey,
     nickname,
+  avatarSeed,
+  avatarDataUri,
+  avatarSvg,
   getPubKey,
   getPrivKey,
+  regenerateAvatarSeed,
   }
 })
