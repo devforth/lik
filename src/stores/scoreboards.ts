@@ -15,7 +15,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
 
   // IndexedDB helpers (lazy)
   const DB_NAME = 'appdb'
-  const DB_VERSION = 1
+  const DB_VERSION = 2
   const STORE = 'scoreboards'
   let idb: IDBDatabase | null = null
 
@@ -26,6 +26,10 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         const db = req.result
         if (!db.objectStoreNames.contains(STORE)) {
           db.createObjectStore(STORE, { keyPath: 'id' })
+        }
+        // Keep other app stores created too, in case this is the first opener
+        if (!db.objectStoreNames.contains('user')) {
+          db.createObjectStore('user', { keyPath: 'id' })
         }
       }
       req.onsuccess = () => resolve(req.result)

@@ -22,11 +22,6 @@ const props = withDefaults(defineProps<SidebarMenuButtonProps>(), {
 
 // Auto-close the mobile sidebar when a menu item is clicked.
 const { isMobile, openMobile, setOpenMobile } = useSidebar()
-function handleClick() {
-  if (isMobile?.value && openMobile?.value) {
-    setOpenMobile(false)
-  }
-}
 </script>
 
 <template>
@@ -38,7 +33,6 @@ function handleClick() {
     :class="cn(sidebarMenuButtonVariants({ variant, size }), props.class)"
     :as="as"
     :as-child="asChild"
-    @click="handleClick"
     v-bind="$attrs"
   >
     <slot />
