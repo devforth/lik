@@ -127,5 +127,7 @@
     @apply bg-background text-foreground;
   }
 
-  html { font-size: 16px; } /* makes all rem-based sizes bigger */
+  /* Base scale for the whole UI. All rem-based sizes will scale with this. */
+  :root { --ui-scale: 1; }
+  html { font-size: calc(16px * var(--ui-scale)); }
 }

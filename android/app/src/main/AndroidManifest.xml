@@ -37,5 +37,11 @@
 
     <!-- Permissions -->
 
+    <!-- Required to access the camera for QR scanning via getUserMedia -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Optional: mark camera hardware as not strictly required so app installs on devices without cameras -->
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 </manifest>

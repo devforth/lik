@@ -14,13 +14,18 @@
               Scoreboards
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem v-for="sb in scoreboards" :key="sb.id">
-                  <SidebarMenuButton asChild @click="goToScoreboard(sb.id)">
-                    <span>{{ sb.name }}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
+              <template v-if="scoreboards.length">
+                <SidebarMenu>
+                  <SidebarMenuItem v-for="sb in scoreboards" :key="sb.id">
+                    <SidebarMenuButton asChild @click="goToScoreboard(sb.id)">
+                      <span>{{ sb.name }}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </template>
+              <template v-else>
+                <p class="px-2 py-1 text-xs text-muted-foreground">No scoreboards yet</p>
+              </template>
             </SidebarGroupContent>
 
             <CloseMobileSidebar>
