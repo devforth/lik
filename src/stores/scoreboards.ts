@@ -1,8 +1,9 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { nowUtc } from '@/time-sync'
-import { subscribeTag } from '@/nostr'
+import { subscribeTag, send as nostrSend } from '@/nostr'
 import { useUserStore } from '@/stores/user'
+import { toast } from 'vue-sonner'
 
 export interface Scoreboard {
   id: string
@@ -193,6 +194,57 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     }
   }
 
+  /**
+   * Join a scoreboard by a code like "lik-<id>".
+   * - If the scoreboard is already in user's list and they are the author: show error toast.
+   * - If it's already in the list but not authored by the user: show info toast.
+   * - Otherwise, send a Nostr join request tagged with lik-sb-join-req-<id>.
+   */
+  async function join(code: string): Promise<{ ok: boolean; reason?: 'own' | 'already' | 'bad-code' | 'no-keys' }> {
+    const raw = String(code || '').trim()
+    // Extract scoreboard id from code
+    const m = /^lik-([0-9a-fA-F-]{8,})$/.exec(raw)
+    if (!m) {
+      toast.error('Invalid code', { description: 'Use a code starting with "lik-"' })
+      return { ok: false, reason: 'bad-code' }
+    }
+    const id = m[1]
+
+    // Check duplicates/ownership
+    const existing = items.value.find((s) => s.id === id)
+    const user = useUserStore()
+    const myPub = user.getPubKey() || ''
+    if (existing) {
+      if (existing.authorPubKey && existing.authorPubKey === myPub) {
+        toast.error('You cant join own scoreboard')
+        return { ok: false, reason: 'own' }
+      }
+      toast.info('You have already joinde this scoreboard')
+      return { ok: false, reason: 'already' }
+    }
+
+    // Ensure keys
+    const profile = await user.ensureUser()
+    const pub = profile.pubkeyHex
+    const priv = profile.privkeyHex
+    if (!pub || !priv) {
+      toast.error('Profile not ready', { description: 'Missing keys to send join request.' })
+      return { ok: false, reason: 'no-keys' }
+    }
+
+    // Send join request on Nostr
+    const tag = `lik-sb-join-req-${id}`
+    try {
+      await nostrSend(pub, priv, 1, `join-request ${id}`, [[ 't', tag ]])
+      toast.success('Join request sent', { description: `Waiting for approval…` })
+      return { ok: true }
+    } catch (e) {
+      console.warn('[scoreboards] join send failed', e)
+      toast.error('Failed to send request', { description: 'Please try again.' })
+      return { ok: false }
+    }
+  }
+
   return {
     items,
     addScoreboard,
@@ -202,5 +254,6 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     // nostr helpers
     startJoinSubscriptions,
     stopJoinSubscriptions,
+    join,
   }
 })

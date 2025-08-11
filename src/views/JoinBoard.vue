@@ -58,8 +58,10 @@ import { Input } from '@/components/ui/input'
 import { toast } from 'vue-sonner'
 import { useRouter } from 'vue-router'
 import { ArrowLeft } from 'lucide-vue-next'
+import { useScoreboardsStore } from '@/stores/scoreboards'
 
 const router = useRouter()
+const scoreboards = useScoreboardsStore()
 const videoRef = ref<HTMLVideoElement | null>(null)
 const streamRef = ref<MediaStream | null>(null)
 const detecting = ref(false)
@@ -95,8 +97,15 @@ function handleCode(code: string) {
     toast.error('Invalid code', { description: 'The QR code must start with "lik-"' })
     return
   }
-  toast.success('Code recognized', { description: code })
-  // Later: navigate/join logic here
+  // call join action
+  void (async () => {
+    const res = await scoreboards.join(code)
+    if (res.ok) {
+      // Go back after slight delay to show toast
+      setTimeout(() => router.back(), 300)
+    }
+    // errors are already toasted in the store
+  })()
 }
 
 function submitManual() {
