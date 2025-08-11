@@ -87,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { MoreVertical, Trash2, QrCode, Copy, Check } from 'lucide-vue-next'
@@ -120,6 +120,18 @@ const drawerOpen = ref(false)
 const inviteOpen = ref(false)
 const copied = ref(false)
 const boardId = computed(() => (id.value ? `lik-${id.value}` : ''))
+const LAST_KEY = 'lik:lastScoreboardId'
+const CLIPBOARD_KEY = 'lik:lastCopiedBoardId'
+
+// Remember last open scoreboard
+watch(
+  id,
+  (val) => {
+    if (!val) return
+    try { localStorage.setItem(LAST_KEY, val) } catch {}
+  },
+  { immediate: true }
+)
 function openConfirm() {
   drawerOpen.value = true
 }
@@ -144,6 +156,7 @@ async function copyBoardId() {
     if (!boardId.value) return
     await navigator.clipboard.writeText(boardId.value)
     copied.value = true
+  try { localStorage.setItem(CLIPBOARD_KEY, boardId.value) } catch {}
     setTimeout(() => (copied.value = false), 1500)
   } catch (e) {
     // noop

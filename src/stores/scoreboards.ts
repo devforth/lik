@@ -12,6 +12,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   const items = ref<Scoreboard[]>([])
   // internal: indicates hydration in progress to avoid write loops
   let hydrating = false
+  // expose a readiness promise to let router/pages wait for initial load
+  let initPromise: Promise<void> | null = null
 
   // IndexedDB helpers (lazy)
   const DB_NAME = 'appdb'
@@ -130,7 +132,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   }
 
   // hydrate from IndexedDB on first use
-  ;(async () => {
+  initPromise = (async () => {
     hydrating = true
     try {
       const rows = await loadAll()
@@ -160,5 +162,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     items,
     addScoreboard,
   deleteScoreboard,
+  // allow consumers to await initial load completion
+  ensureLoaded: async () => { if (initPromise) await initPromise },
   }
 })
