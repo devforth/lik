@@ -62,7 +62,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
 
   // rejected store helpers
   type RejectedRow = { id: string; expiresAt: number }
-  const TTL_MS = 5 * 24 * 60 * 60 * 1000 // 5 days
+  const TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
 
   async function loadRejected(): Promise<RejectedRow[]> {
     try {
@@ -264,6 +264,10 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     // remove from lastRequests
     const list = lastRequests.value[boardId] || []
     lastRequests.value = { ...lastRequests.value, [boardId]: list.filter((r) => r.id !== eventId) }
+    // also ignore this request id going forward (same as rejected), with TTL
+    const exp = Date.now() + TTL_MS
+    rejected.value.set(eventId, exp)
+    await saveRejected(eventId, exp)
   }
 
   async function reject(boardId: string, eventId: string) {

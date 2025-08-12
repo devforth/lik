@@ -19,23 +19,26 @@ export interface UserProfile {
 
 export const useUserStore = defineStore('user', () => {
   const profile = ref<UserProfile | null>(null)
+  // Serialize initialization to avoid duplicate creations on parallel calls
+  let ensurePromise: Promise<UserProfile> | null = null
 
   const STORE = 'user'
 
   async function loadExisting(): Promise<UserProfile | null> {
     try {
       const rows: any[] = await dbGetAll<any>(STORE)
-      return (rows && rows[0])
-        ? {
-            id: String(rows[0].id),
-            nickname: String(rows[0].nickname || ''),
-            pubkeyHex: String(rows[0].pubkeyHex || ''),
-            privkeyHex: String(rows[0].privkeyHex || ''),
-            createdAt: Number(rows[0].createdAt || 0),
-            // For older records, fallback avatar seed to nickname
-            avatarSeed: String(rows[0].avatarSeed || rows[0].nickname || ''),
-          }
-        : null
+      if (!rows || rows.length === 0) return null
+      // Normalize, choose the newest by createdAt
+      const list = rows.map((r) => ({
+        id: String(r.id),
+        nickname: String(r.nickname || ''),
+        pubkeyHex: String(r.pubkeyHex || ''),
+        privkeyHex: String(r.privkeyHex || ''),
+        createdAt: Number(r.createdAt || 0),
+        avatarSeed: String(r.avatarSeed || r.nickname || ''),
+      }))
+  const newest = list.reduce((a, b) => (a.createdAt >= b.createdAt ? a : b))
+  return newest
     } catch (e) {
       console.warn('[user] loadExisting failed', e)
       return null
@@ -67,30 +70,39 @@ export const useUserStore = defineStore('user', () => {
 
   async function ensureUser(): Promise<UserProfile> {
     if (profile.value) return profile.value
+    if (ensurePromise) return ensurePromise
 
-    const existing = await loadExisting()
-    if (existing && existing.privkeyHex && existing.pubkeyHex) {
-      profile.value = existing
-      // Trigger verification/publish after loading from IDB
-      scheduleProfileSync('startup-load')
-      return existing
-    }
+    ensurePromise = (async () => {
+      const existing = await loadExisting()
+      if (existing && existing.privkeyHex && existing.pubkeyHex) {
+        profile.value = existing
+        // Trigger verification/publish after loading from IDB
+        scheduleProfileSync('startup-load')
+        return existing
+      }
 
-    const nickname = generateNickname()
-    const { pubkeyHex, privkeyHex } = generateNostrKeys()
-    const p: UserProfile = {
-      id: pubkeyHex,
-      nickname,
-      pubkeyHex,
-      privkeyHex,
-      createdAt: Date.now(),
-      avatarSeed: nickname, // default seed equals username
+      const nickname = generateNickname()
+      const { pubkeyHex, privkeyHex } = generateNostrKeys()
+      const p: UserProfile = {
+        id: pubkeyHex,
+        nickname,
+        pubkeyHex,
+        privkeyHex,
+        createdAt: Date.now(),
+        avatarSeed: nickname, // default seed equals username
+      }
+      profile.value = p
+      await saveProfile(p)
+      // Trigger initial publish via scheduler (no direct publish)
+      scheduleProfileSync('initial-publish', 0)
+      return p
+    })()
+
+    try {
+      return await ensurePromise
+    } finally {
+      ensurePromise = null
     }
-    profile.value = p
-    await saveProfile(p)
-  // Trigger initial publish via scheduler (no direct publish)
-  scheduleProfileSync('initial-publish', 0)
-    return p
   }
 
   const pubkey = computed(() => profile.value?.pubkeyHex ?? null)
