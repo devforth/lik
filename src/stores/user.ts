@@ -5,13 +5,8 @@ import { bytesToHex } from 'nostr-tools/utils'
 import { generateSecretKey, getPublicKey } from 'nostr-tools'
 import { createAvatar } from '@dicebear/core'
 import { thumbs } from '@dicebear/collection'
-import {
-  RELAYS as NOSTR_RELAYS,
-  publishProfile as nostrPublishProfile,
-  publishProfileToRelays as nostrPublishProfileToRelays,
-  computeMetadataHash,
-  getProfileHashPerRelay,
-} from '@/nostr'
+import { RELAYS as NOSTR_RELAYS, publishProfileToRelays as nostrPublishProfileToRelays, computeMetadataHash, getProfileHashPerRelay } from '@/nostr'
+import { dbGetAll, dbPut } from '@/lib/idb'
 
 export interface UserProfile {
   id: string // same as pubkey for convenience
@@ -25,52 +20,11 @@ export interface UserProfile {
 export const useUserStore = defineStore('user', () => {
   const profile = ref<UserProfile | null>(null)
 
-  // IndexedDB setup
-  const DB_NAME = 'appdb'
-  const DB_VERSION = 2 // adding fields on an object store doesn't require version bump
   const STORE = 'user'
-  let idb: IDBDatabase | null = null
-
-  function openIdb(name: string, version: number): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(name, version)
-      req.onupgradeneeded = () => {
-        const db = req.result
-        if (!db.objectStoreNames.contains(STORE)) {
-          db.createObjectStore(STORE, { keyPath: 'id' })
-        }
-        // Also ensure scoreboards store remains created if DB was empty
-        if (!db.objectStoreNames.contains('scoreboards')) {
-          db.createObjectStore('scoreboards', { keyPath: 'id' })
-        }
-      }
-      req.onsuccess = () => resolve(req.result)
-      req.onerror = () => reject(req.error)
-    })
-  }
-
-  async function ensureDb(): Promise<IDBDatabase | null> {
-    if (idb) return idb
-    try {
-      idb = await openIdb(DB_NAME, DB_VERSION)
-      return idb
-    } catch (e) {
-      console.warn('[user] IndexedDB unavailable, persistence disabled', e)
-      return null
-    }
-  }
 
   async function loadExisting(): Promise<UserProfile | null> {
-    const db = await ensureDb()
-    if (!db) return null
     try {
-      const tx = db.transaction(STORE, 'readonly')
-      const store = tx.objectStore(STORE)
-      const rows: any[] = await new Promise((resolve, reject) => {
-        const req = store.getAll()
-        req.onsuccess = () => resolve(req.result as any[])
-        req.onerror = () => reject(req.error)
-      })
+      const rows: any[] = await dbGetAll<any>(STORE)
       return (rows && rows[0])
         ? {
             id: String(rows[0].id),
@@ -89,16 +43,11 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function saveProfile(p: UserProfile) {
-    const db = await ensureDb()
-    if (!db) return
-    const tx = db.transaction(STORE, 'readwrite')
-    const store = tx.objectStore(STORE)
-    store.put(JSON.parse(JSON.stringify(p))) // ensure no circular refs
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-      tx.onabort = () => reject(tx.error)
-    })
+    try {
+      await dbPut(STORE, JSON.parse(JSON.stringify(p)))
+    } catch (e) {
+      console.warn('[user] saveProfile failed', e)
+    }
   }
 
   function generateNickname(): string {

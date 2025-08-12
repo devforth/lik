@@ -1,21 +1,29 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { nowUtc } from '@/time-sync'
-import { subscribeTag, send as nostrSend } from '@/nostr'
+import { subscribeTag, send as nostrSend, fetchLatestProfile } from '@/nostr'
 import { useUserStore } from '@/stores/user'
 import { toast } from 'vue-sonner'
+import { useProfilesStore } from '@/stores/profiles'
+import { dbGetAll, dbBulkPut, dbDelete, dbPut } from '@/lib/idb'
 
 export interface Scoreboard {
   id: string
   name: string
   createdAt: number
   authorPubKey: string
+  // members list of approved pubkeys
+  members?: string[]
 }
 
 export const useScoreboardsStore = defineStore('scoreboards', () => {
   const items = ref<Scoreboard[]>([])
   // nostr subscriptions cleanup map
   const unsubById = new Map<string, () => void>()
+  // last join requests per scoreboard id
+  const lastRequests = ref<Record<string, JoinReq[]>>({})
+  // blacklist of rejected join request ids with TTL
+  const rejected = ref<Map<string, number>>(new Map())
   // internal: indicates hydration in progress to avoid write loops
   let hydrating = false
   // expose a readiness promise to let router/pages wait for initial load
@@ -23,53 +31,17 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
 
   // IndexedDB helpers (lazy)
   const DB_NAME = 'appdb'
-  const DB_VERSION = 2
+  const DB_VERSION = 3
   const STORE = 'scoreboards'
-  let idb: IDBDatabase | null = null
-
-  function openIdb(name: string, version: number): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(name, version)
-      req.onupgradeneeded = () => {
-        const db = req.result
-        if (!db.objectStoreNames.contains(STORE)) {
-          db.createObjectStore(STORE, { keyPath: 'id' })
-        }
-        // Keep other app stores created too, in case this is the first opener
-        if (!db.objectStoreNames.contains('user')) {
-          db.createObjectStore('user', { keyPath: 'id' })
-        }
-      }
-      req.onsuccess = () => resolve(req.result)
-      req.onerror = () => reject(req.error)
-    })
-  }
-
-  async function ensureDb(): Promise<IDBDatabase | null> {
-    if (idb) return idb
-    try {
-      idb = await openIdb(DB_NAME, DB_VERSION)
-      return idb
-    } catch (e) {
-      console.warn('[scoreboards] IndexedDB unavailable, persistence disabled', e)
-      return null
-    }
-  }
+  const REJECT_STORE = 'rejectedScoreboardRequests'
+  // no local ensureDb; use lib/idb.ts
 
   async function loadAll(): Promise<Scoreboard[] | null> {
-    const db = await ensureDb()
-    if (!db) return null
     try {
-      const tx = db.transaction(STORE, 'readonly')
-      const store = tx.objectStore(STORE)
-      const values: any[] = await new Promise((resolve, reject) => {
-        const req = store.getAll()
-        req.onsuccess = () => resolve(req.result as any[])
-        req.onerror = () => reject(req.error)
-      })
+      const values: any[] = await dbGetAll<any>(STORE)
       // ensure createdAt is a number and sort asc
       return values
-        .map((v) => ({ id: String(v.id), name: String(v.name), createdAt: Number(v.createdAt), authorPubKey: String(v.authorPubKey || '') }))
+        .map((v) => ({ id: String(v.id), name: String(v.name), createdAt: Number(v.createdAt), authorPubKey: String(v.authorPubKey || ''), members: Array.isArray(v.members) ? v.members.map(String) : [] }))
         .sort((a, b) => a.createdAt - b.createdAt)
     } catch (e) {
       console.warn('[scoreboards] loadAll failed', e)
@@ -78,22 +50,56 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   }
 
   async function saveAll(list: Scoreboard[]) {
-    const db = await ensureDb()
-    if (!db) return
     try {
-      const tx = db.transaction(STORE, 'readwrite')
-      const store = tx.objectStore(STORE)
-      for (const sb of list) {
-        store.put({ id: sb.id, name: sb.name, createdAt: sb.createdAt, authorPubKey: sb.authorPubKey })
-      }
-      await new Promise<void>((resolve, reject) => {
-        tx.oncomplete = () => resolve()
-        tx.onerror = () => reject(tx.error)
-        tx.onabort = () => reject(tx.error)
-      })
+      await dbBulkPut(
+        STORE,
+        list.map((sb) => ({ id: sb.id, name: sb.name, createdAt: sb.createdAt, authorPubKey: sb.authorPubKey, members: Array.isArray(sb.members) ? sb.members : [] }))
+      )
     } catch (e) {
       console.warn('[scoreboards] saveAll failed', e)
     }
+  }
+
+  // rejected store helpers
+  type RejectedRow = { id: string; expiresAt: number }
+  const TTL_MS = 5 * 24 * 60 * 60 * 1000 // 5 days
+
+  async function loadRejected(): Promise<RejectedRow[]> {
+    try {
+      return await dbGetAll<RejectedRow>(REJECT_STORE)
+    } catch (e) {
+      console.warn('[scoreboards] loadRejected failed', e)
+      return []
+    }
+  }
+
+  async function saveRejected(id: string, expiresAt: number) {
+    try {
+      await dbPut(REJECT_STORE, { id, expiresAt })
+    } catch (e) {
+      console.warn('[scoreboards] saveRejected failed', e)
+    }
+  }
+
+  async function purgeExpiredRejected() {
+    const rows = await loadRejected()
+    const now = Date.now()
+    for (const r of rows) {
+      if (r.expiresAt <= now) {
+        try { await dbDelete(REJECT_STORE, r.id) } catch {}
+      }
+    }
+  }
+
+  function isRejected(eventId: string): boolean {
+    const exp = rejected.value.get(eventId)
+    if (!exp) return false
+    if (exp <= Date.now()) {
+      rejected.value.delete(eventId)
+      // cleanup persisted later
+      return false
+    }
+    return true
   }
 
   function addScoreboard(name: string): Scoreboard {
@@ -106,6 +112,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       name,
       createdAt: nowUtc(),
       authorPubKey,
+      members: [],
     }
     items.value.push(sb)
     // persist eagerly for immediate durability
@@ -125,16 +132,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
 
     // delete persisted record as well
     try {
-      const db = await ensureDb()
-      if (!db) return true
-      const tx = db.transaction(STORE, 'readwrite')
-      const store = tx.objectStore(STORE)
-      store.delete(id)
-      await new Promise<void>((resolve, reject) => {
-        tx.oncomplete = () => resolve()
-        tx.onerror = () => reject(tx.error)
-        tx.onabort = () => reject(tx.error)
-      })
+      await dbDelete(STORE, id)
     } catch (e) {
       console.warn('[scoreboards] delete failed', e)
     }
@@ -151,6 +149,16 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         items.value = rows
   // subscribe for all existing
         for (const sb of items.value) subscribeJoinTagFor(sb.id)
+      }
+      // load rejected blacklist
+      try {
+        await purgeExpiredRejected()
+        const rowsR = await loadRejected()
+        rejected.value.clear()
+        const now = Date.now()
+        for (const r of rowsR) if (r.expiresAt > now) rejected.value.set(r.id, r.expiresAt)
+      } catch (e) {
+        console.warn('[scoreboards] rejected load failed', e)
       }
     } finally {
       hydrating = false
@@ -171,6 +179,33 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     { deep: true }
   )
 
+  // Keep profiles store subscribed to all members across scoreboards
+  watch(
+    items,
+    (list) => {
+      try {
+        const prof = useProfilesStore()
+        const allMembers = new Set<string>()
+        for (const sb of list) {
+          if (Array.isArray(sb.members)) for (const m of sb.members) if (m) allMembers.add(String(m))
+          if (sb.authorPubKey) allMembers.add(String(sb.authorPubKey))
+        }
+        prof.setTrackedPubkeys(Array.from(allMembers))
+      } catch {}
+    },
+    { deep: true, immediate: true }
+  )
+
+  type JoinReq = { id: string; pubkey: string; createdAt: number; name?: string; picture?: string }
+
+  function pushJoinRequest(boardId: string, req: JoinReq) {
+    const list = lastRequests.value[boardId] || []
+    // dedupe by event id
+    if (list.some((r) => r.id === req.id)) return
+    const next = [...list, req].sort((a, b) => b.createdAt - a.createdAt).slice(0, 3)
+    lastRequests.value = { ...lastRequests.value, [boardId]: next }
+  }
+
   function subscribeJoinTagFor(id: string) {
     const tag = `lik-sb-join-req-${id}`
     // close existing if any
@@ -178,7 +213,27 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       try { unsubById.get(id)!() } catch {}
       unsubById.delete(id)
     }
-    const unsub = subscribeTag(tag)
+    const unsub = subscribeTag(tag, async (evt: any) => {
+      // Expect a kind 1 note with content like "join-request <id>"
+      try {
+        const evtId = String(evt?.id || '')
+        const pubkey = String(evt?.pubkey || '')
+        const createdAt = Number(evt?.created_at || 0)
+        if (!evtId || !pubkey) return
+        if (isRejected(evtId)) return
+        // Fetch latest profile and only include if has some info
+        try {
+          const prof = await fetchLatestProfile(pubkey, 2500)
+          const data: any = prof?.data || {}
+          const name = String(data?.name || data?.display_name || data?.username || '')
+          const picture = String(data?.picture || '')
+          if (!name && !picture) return // ignore join request without profile info
+          pushJoinRequest(id, { id: evtId, pubkey, createdAt, name, picture })
+        } catch {
+          // ignore on failure
+        }
+      } catch {}
+    })
     unsubById.set(id, unsub)
   }
 
@@ -192,6 +247,32 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       try { fn() } catch {}
       unsubById.delete(id)
     }
+  }
+
+  function isOwner(boardId: string, myPub: string | null): boolean {
+    const sb = items.value.find((s) => s.id === boardId)
+    if (!sb || !myPub) return false
+    return sb.authorPubKey === myPub
+  }
+
+  async function approve(boardId: string, eventId: string, pubkey: string) {
+    const sb = items.value.find((s) => s.id === boardId)
+    if (!sb) return
+    if (!Array.isArray(sb.members)) sb.members = []
+    if (!sb.members.includes(pubkey)) sb.members.push(pubkey)
+    await saveAll(items.value)
+    // remove from lastRequests
+    const list = lastRequests.value[boardId] || []
+    lastRequests.value = { ...lastRequests.value, [boardId]: list.filter((r) => r.id !== eventId) }
+  }
+
+  async function reject(boardId: string, eventId: string) {
+    const exp = Date.now() + TTL_MS
+    rejected.value.set(eventId, exp)
+    await saveRejected(eventId, exp)
+    // remove from visible requests
+    const list = lastRequests.value[boardId] || []
+    lastRequests.value = { ...lastRequests.value, [boardId]: list.filter((r) => r.id !== eventId) }
   }
 
   /**
@@ -247,6 +328,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
 
   return {
     items,
+  lastRequests,
     addScoreboard,
     deleteScoreboard,
     // allow consumers to await initial load completion
@@ -255,5 +337,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     startJoinSubscriptions,
     stopJoinSubscriptions,
     join,
+  isOwner,
+  approve,
+  reject,
   }
 })

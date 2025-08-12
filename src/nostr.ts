@@ -61,6 +61,101 @@ export function subscribeTag(tag: string, onEvent?: (event: NostrEvent, relay?: 
 }
 
 /**
+ * Subscribe to kind:0 profile events for a set of authors. Keeps the subscription open.
+ * Returns an unsubscribe function.
+ */
+export function subscribeProfiles(
+  authors: string[],
+  onProfile: (pubkey: string, profile: Record<string, unknown>, evt: NostrEvent) => void
+) {
+  const key = `authors:${authors.sort().join(',')}:k0`
+  if (activeSubs.has(key)) {
+    try { activeSubs.get(key)?.close?.() } catch {}
+    activeSubs.delete(key)
+  }
+  const sub = pool.subscribeMany(
+    RELAYS,
+    [
+      {
+        kinds: [0],
+        authors: authors.map(String),
+      },
+    ],
+    {
+      onevent: (evt) => {
+        const pk = String(evt?.pubkey || '')
+        if (!pk) return
+        let obj: any = {}
+        try { obj = JSON.parse(String(evt.content || '{}')) } catch { obj = {} }
+        onProfile(pk, obj, evt)
+      },
+      oneose: () => {
+        // keep it open
+      },
+    }
+  )
+  activeSubs.set(key, sub)
+  return () => {
+    try { sub.close() } finally { activeSubs.delete(key) }
+  }
+}
+
+/**
+ * Fetch the latest kind:0 profile for a single pubkey across relays; resolves with parsed JSON or null.
+ */
+export async function fetchLatestProfile(pubkeyHex: string, timeoutMs = 3000): Promise<{ data: any; created_at: number } | null> {
+  const authors = [String(pubkeyHex)]
+  let latest: any | null = null
+  let latestTs = 0
+
+  await Promise.all(
+    RELAYS.map((relay) =>
+      new Promise<void>((resolve) => {
+        let resolved = false
+        const sub = pool.subscribeMany(
+          [relay],
+          [
+            {
+              kinds: [0],
+              authors,
+            },
+          ],
+          {
+            onevent: (evt) => {
+              const ts = Number(evt?.created_at || 0)
+              if (!latest || ts > latestTs) {
+                latest = evt
+                latestTs = ts
+              }
+            },
+            oneose: () => {
+              if (resolved) return
+              try { sub.close() } catch {}
+              resolved = true
+              resolve()
+            },
+          }
+        )
+        setTimeout(() => {
+          if (resolved) return
+          try { sub.close() } catch {}
+          resolved = true
+          resolve()
+        }, timeoutMs)
+      })
+    )
+  )
+
+  if (!latest) return null
+  try {
+    const data = JSON.parse(String(latest.content || '{}'))
+    return { data, created_at: Number(latest.created_at || 0) }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Publish a Nostr event to all configured relays.
  * @param pubkeyHex - 32-byte hex public key
  * @param privkeyHex - 32-byte hex secret key
@@ -188,6 +283,7 @@ export { canonicalJSONStringify, sha256Hex, computeMetadataHash } from '@/lib/ut
 export default {
   RELAYS,
   subscribeTag,
+  subscribeProfiles,
   send,
   publishProfile,
   publishProfileToRelays,
@@ -195,4 +291,5 @@ export default {
   sha256Hex,
   computeMetadataHash,
   getProfileHashPerRelay,
+  fetchLatestProfile,
 }

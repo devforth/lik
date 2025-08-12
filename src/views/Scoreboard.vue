@@ -15,6 +15,10 @@
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" class="w-44">
+          <DropdownMenuItem @click="openSettings()">
+            <Settings class="h-4 w-4" />
+            <span>Settings</span>
+          </DropdownMenuItem>
           <DropdownMenuItem @click="openInvite()">
             <QrCode class="h-4 w-4" />
             <span>Invite to board</span>
@@ -83,6 +87,70 @@
         </div>
       </DrawerContent>
     </Drawer>
+
+    <!-- Settings drawer: owner and members list -->
+    <Drawer v-model:open="settingsOpen">
+      <DrawerContent>
+        <div class="mx-auto w-full max-w-md">
+          <DrawerHeader>
+            <DrawerTitle>Scoreboard settings</DrawerTitle>
+            <DrawerDescription>Owner and members</DrawerDescription>
+          </DrawerHeader>
+
+          <div class="px-4 pb-4 space-y-6">
+            <div>
+              <div class="text-xs text-muted-foreground mb-2">Owner</div>
+              <div v-if="ownerProfile" class="flex items-center gap-3">
+                <img :src="ownerProfile.picture || ''" class="h-9 w-9 rounded-md bg-muted object-cover" alt="owner" />
+                <div class="text-sm font-medium">{{ ownerProfile.name || short(ownerProfile.pubkey) }}</div>
+              </div>
+              <div v-else class="text-sm text-muted-foreground">Unknown</div>
+            </div>
+
+            <div>
+              <div class="text-xs text-muted-foreground mb-2">Members ({{ members.length }})</div>
+              <div v-if="members.length" class="space-y-2">
+                <div v-for="m in members" :key="m.pubkey" class="flex items-center gap-3">
+                  <img :src="m.picture || ''" class="h-8 w-8 rounded-md bg-muted object-cover" alt="avatar" />
+                  <div class="min-w-0">
+                    <div class="text-sm truncate">{{ m.name || short(m.pubkey) }}</div>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="text-sm text-muted-foreground">No members yet</div>
+            </div>
+          </div>
+
+          <DrawerFooter>
+            <DrawerClose as-child>
+              <Button variant="outline">Close</Button>
+            </DrawerClose>
+          </DrawerFooter>
+        </div>
+      </DrawerContent>
+    </Drawer>
+
+    <!-- Owner: last 3 join requests -->
+    <div v-if="isOwner && myRequests.length" class="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur border-t p-3">
+      <div class="max-w-screen-md mx-auto">
+        <div class="text-xs text-muted-foreground mb-2">Recent join requests</div>
+        <div class="space-y-2">
+          <div v-for="req in myRequests" :key="req.id" class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <img :src="req.picture || ''" class="h-8 w-8 rounded-md bg-muted object-cover" alt="avatar" />
+              <div class="min-w-0">
+                <div class="text-sm truncate">{{ req.name || req.pubkey.slice(0,8) }}</div>
+                <div class="text-xs text-muted-foreground">{{ new Date(req.createdAt*1000).toLocaleTimeString() }}</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <Button size="sm" variant="secondary" @click="approveJoin(req.id, req.pubkey)">Approve</Button>
+              <Button size="sm" variant="ghost" @click="rejectJoin(req.id)">Reject</Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -90,7 +158,8 @@
 import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScoreboardsStore } from '@/stores/scoreboards'
-import { MoreVertical, Trash2, QrCode, Copy, Check } from 'lucide-vue-next'
+import { useUserStore } from '@/stores/user'
+import { MoreVertical, Trash2, QrCode, Copy, Check, Settings } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -109,15 +178,18 @@ import {
 } from '@/components/ui/drawer'
 import { Input } from '@/components/ui/input'
 import QrcodeVue from 'qrcode.vue'
+import { useProfilesStore } from '@/stores/profiles'
 const route = useRoute()
 const router = useRouter()
 const id = computed(() => String(route.params.id || ''))
 
 const store = useScoreboardsStore()
+const user = useUserStore()
 const scoreboard = computed(() => store.items.find((s) => s.id === id.value))
 
 const drawerOpen = ref(false)
 const inviteOpen = ref(false)
+const settingsOpen = ref(false)
 const copied = ref(false)
 const boardId = computed(() => (id.value ? `lik-${id.value}` : ''))
 const LAST_KEY = 'lik:lastScoreboardId'
@@ -137,6 +209,9 @@ function openConfirm() {
 }
 function openInvite() {
   inviteOpen.value = true
+}
+function openSettings() {
+  settingsOpen.value = true
 }
 async function confirmDelete() {
   if (!id.value) return
@@ -162,4 +237,34 @@ async function copyBoardId() {
     // noop
   }
 }
+
+// Owner-only: last 3 join requests real-time UI
+const myRequests = computed(() => store.lastRequests[id.value] || [])
+const isOwner = computed(() => store.isOwner(id.value, user.getPubKey()))
+
+function approveJoin(reqId: string, pubkey: string) {
+  if (!id.value) return
+  void store.approve(id.value, reqId, pubkey)
+}
+function rejectJoin(reqId: string) {
+  if (!id.value) return
+  void store.reject(id.value, reqId)
+}
+
+// profiles store subscriptions are managed globally by the scoreboards store
+
+// Settings data: owner + members
+const profiles = useProfilesStore()
+const ownerProfile = computed(() => {
+  const pub = scoreboard.value?.authorPubKey || ''
+  return pub ? profiles.get(pub) : null
+})
+const members = computed(() => {
+  const list = scoreboard.value?.members || []
+  return list
+    .filter(Boolean)
+    .map((pk) => profiles.get(pk) || { pubkey: pk, name: '', picture: '', updatedAt: 0 })
+})
+
+function short(pk: string) { return (pk || '').slice(0, 8) }
 </script>
