@@ -5,7 +5,13 @@ import { bytesToHex } from 'nostr-tools/utils'
 import { generateSecretKey, getPublicKey } from 'nostr-tools'
 import { createAvatar } from '@dicebear/core'
 import { thumbs } from '@dicebear/collection'
-import { publishProfile as nostrPublishProfile } from '@/nostr'
+import {
+  RELAYS as NOSTR_RELAYS,
+  publishProfile as nostrPublishProfile,
+  publishProfileToRelays as nostrPublishProfileToRelays,
+  computeMetadataHash,
+  getProfileHashPerRelay,
+} from '@/nostr'
 
 export interface UserProfile {
   id: string // same as pubkey for convenience
@@ -87,7 +93,7 @@ export const useUserStore = defineStore('user', () => {
     if (!db) return
     const tx = db.transaction(STORE, 'readwrite')
     const store = tx.objectStore(STORE)
-    store.put(p)
+    store.put(JSON.parse(JSON.stringify(p))) // ensure no circular refs
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
@@ -116,6 +122,8 @@ export const useUserStore = defineStore('user', () => {
     const existing = await loadExisting()
     if (existing && existing.privkeyHex && existing.pubkeyHex) {
       profile.value = existing
+      // Trigger verification/publish after loading from IDB
+      scheduleProfileSync('startup-load')
       return existing
     }
 
@@ -180,36 +188,80 @@ export const useUserStore = defineStore('user', () => {
     await saveProfile(profile.value)
   }
 
-  // Publish the current profile metadata to Nostr (kind 0)
-  async function publishProfileToNostr() {
-    const p = await ensureUser()
-    // Build metadata
-    const meta = {
-      name: p.nickname,
+  // Build current metadata object consistently
+  function currentMetadata() {
+    const p = profile.value
+    return {
+      name: p?.nickname || '',
       picture: avatarDataUri.value,
       about: 'LIK user',
     }
-    await nostrPublishProfile(p.pubkeyHex, p.privkeyHex, meta)
+  }
+
+  // Publish the current profile metadata to Nostr (kind 0), verifying per-relay hash and re-publishing if needed
+  async function publishProfileToNostr() {
+    const p = await ensureUser()
+    const meta = currentMetadata()
+    const localHash = await computeMetadataHash(meta)
+
+    // Ask each relay for our latest kind:0 and compute its hash
+    let remoteHashes: Record<string, string | null> = {}
+    try {
+      remoteHashes = await getProfileHashPerRelay(p.pubkeyHex, NOSTR_RELAYS, 3000)
+    } catch (e) {
+      console.warn('[user] getProfileHashPerRelay failed', e)
+    }
+
+    console.log('[user] got hashes from relays', remoteHashes)
+
+    // Determine which relays need an update
+    const needUpdate: string[] = []
+    for (const r of NOSTR_RELAYS) {
+      const h = remoteHashes[r]
+      if (!h || h !== localHash) needUpdate.push(r)
+    }
+
+    if (needUpdate.length === 0) return
+
+    // Publish to relays that need it
+    try {
+      await nostrPublishProfileToRelays(p.pubkeyHex, p.privkeyHex, meta, needUpdate)
+    } catch (e) {
+      console.warn('[user] publishProfileToRelays failed', e)
+    }
+  }
+
+  // Debounced schedule to avoid spamming relays on rapid changes
+  let syncTimer: number | null = null
+  function scheduleProfileSync(reason: string, delayMs = 300) {
+    if (syncTimer) window.clearTimeout(syncTimer)
+    syncTimer = window.setTimeout(() => {
+      syncTimer = null
+      void publishProfileToNostr()
+    }, delayMs)
   }
 
   // Auto-publish on nickname or avatarSeed change
   watch(
     () => [nickname.value, avatarSeed.value],
-    async () => {
-      try {
-        await publishProfileToNostr()
-      } catch (e) {
-        console.warn('[user] Nostr profile publish failed', e)
-      }
-    },
+    () => scheduleProfileSync('profile-change'),
     { deep: false }
   )
+
+  // Hourly ensure relays have the latest profile
+  let hourlyTimer: number | null = null
+  function startHourlySync() {
+    // run once shortly after init, then every hour
+    scheduleProfileSync('hourly-initial', 1000)
+    if (hourlyTimer) window.clearInterval(hourlyTimer)
+    hourlyTimer = window.setInterval(() => void publishProfileToNostr(), 60 * 60 * 1000)
+  }
 
   function getPubKey(): string | null { return pubkey.value }
   function getPrivKey(): string | null { return privkey.value }
 
   // auto-init when store is first used
-  void ensureUser()
+  void ensureUser().then(() => startHourlySync())
 
   return {
     profile,

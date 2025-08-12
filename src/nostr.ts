@@ -7,6 +7,7 @@ import { SimplePool } from 'nostr-tools/pool'
 import type { EventTemplate } from 'nostr-tools'
 import { finalizeEvent } from 'nostr-tools'
 import { hexToBytes } from 'nostr-tools/utils'
+import { canonicalJSONStringify, sha256Hex, computeMetadataHash } from '@/lib/utils'
 
 export type NostrEvent = any
 
@@ -14,7 +15,7 @@ export type NostrEvent = any
 export const RELAYS = [
   'wss://relay.damus.io',
   'wss://nos.lol',
-  'wss://relay.snort.social',
+  'wss://relay.nostr.net',
 ]
 
 // Shared pool instance for the whole app
@@ -67,7 +68,14 @@ export function subscribeTag(tag: string, onEvent?: (event: NostrEvent, relay?: 
  * @param content - event content
  * @param tags - event tags
  */
-export async function send(pubkeyHex: string, privkeyHex: string, kind: number, content: string, tags: string[][] = []) {
+export async function send(
+  pubkeyHex: string,
+  privkeyHex: string,
+  kind: number,
+  content: string,
+  tags: string[][] = [],
+  relays: string[] = RELAYS
+) {
   try {
   const evt: EventTemplate = {
       kind: Number(kind),
@@ -78,7 +86,7 @@ export async function send(pubkeyHex: string, privkeyHex: string, kind: number, 
     const sk = hexToBytes(String(privkeyHex))
     const signed = finalizeEvent(evt, sk)
     // Fire-and-forget publish to all relays; don't await acks to keep UI snappy
-    pool.publish(RELAYS, signed)
+    pool.publish(relays && relays.length ? relays : RELAYS, signed)
   } catch (e) {
     console.warn('[nostr] send failed', e)
   }
@@ -93,9 +101,98 @@ export async function publishProfile(pubkeyHex: string, privkeyHex: string, prof
   return send(pubkeyHex, privkeyHex, 0, JSON.stringify(obj))
 }
 
+export async function publishProfileToRelays(
+  pubkeyHex: string,
+  privkeyHex: string,
+  profile: Record<string, unknown>,
+  relays: string[]
+) {
+  const obj = profile && typeof profile === 'object' ? profile : {}
+  return send(pubkeyHex, privkeyHex, 0, JSON.stringify(obj), [], relays)
+}
+
+/**
+ * Fetch the latest kind:0 profile event for a pubkey from each relay and return a map of relay -> metadata hash (or null if none).
+ */
+export async function getProfileHashPerRelay(
+  pubkeyHex: string,
+  relays: string[] = RELAYS,
+  timeoutMs = 3000
+): Promise<Record<string, string | null>> {
+  const results: Record<string, string | null> = {}
+
+  await Promise.all(
+    relays.map((relay) =>
+      new Promise<void>((resolve) => {
+        let latest: any | null = null
+        let resolved = false
+        const sub = pool.subscribeMany(
+          [relay],
+          [
+            {
+              kinds: [0],
+              authors: [String(pubkeyHex)],
+              // get all, we'll pick latest at EOSE; many relays honor limit but order isn't guaranteed
+            },
+          ],
+          {
+            onevent: (evt) => {
+              if (!latest || Number(evt?.created_at || 0) > Number(latest.created_at || 0)) {
+                latest = evt
+              }
+            },
+            oneose: async () => {
+              if (resolved) return
+              try {
+                if (latest && typeof latest.content === 'string') {
+                  let parsed: any
+                  try { parsed = JSON.parse(latest.content) } catch { parsed = latest.content }
+                  const canon = canonicalJSONStringify(parsed)
+                  results[relay] = await sha256Hex(canon)
+                } else {
+                  results[relay] = null
+                }
+              } catch {
+                results[relay] = null
+              } finally {
+                try { sub.close() } catch {}
+                resolved = true
+                resolve()
+              }
+            },
+          }
+        )
+
+        // safety timeout
+        const to = setTimeout(() => {
+          if (resolved) return
+          results[relay] = latest && typeof latest.content === 'string' ? null : null
+          try { sub.close() } catch {}
+          resolved = true
+          resolve()
+        }, timeoutMs)
+
+        // If the subscription closes unexpectedly, ensure we clear timeout
+        // Not all versions provide a close callback, but we ensure the timer clears when we resolve
+        // Clear timer in resolve path above.
+      })
+    )
+  )
+
+  return results
+}
+
+// Re-export helpers for convenience/compat with previous imports
+export { canonicalJSONStringify, sha256Hex, computeMetadataHash } from '@/lib/utils'
+
 export default {
   RELAYS,
   subscribeTag,
   send,
   publishProfile,
+  publishProfileToRelays,
+  canonicalJSONStringify,
+  sha256Hex,
+  computeMetadataHash,
+  getProfileHashPerRelay,
 }
