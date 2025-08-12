@@ -14,8 +14,10 @@ export type NostrEvent = any
 // Three popular, free, public relays
 export const RELAYS = [
   'wss://relay.damus.io',
-  'wss://nos.lol',
+  'wss://nostr.mom',
   'wss://relay.nostr.net',
+  'wss://relay.primal.net',
+  
 ]
 
 // Shared pool instance for the whole app
@@ -60,8 +62,19 @@ export function subscribeTag(tag: string, onEvent?: (event: NostrEvent, relay?: 
   }
 }
 
+// All PoW/NIP-13 mining logic removed intentionally.
+
+/** Normalize publish return to an array of promises for easier awaiting. */
+function toPromises(x: any): Promise<any>[] {
+  if (!x) return []
+  if (Array.isArray(x)) return x
+  if (typeof x.then === 'function') return [x]
+  if (typeof x[Symbol.iterator] === 'function') return Array.from(x)
+  return []
+}
+
 /**
- * Subscribe to kind:0 profile events for a set of authors. Keeps the subscription open.
+ * Subscribe to profile events (kind:0) for a set of authors. Keeps the subscription open.
  * Returns an unsubscribe function.
  */
 export function subscribeProfiles(
@@ -77,7 +90,7 @@ export function subscribeProfiles(
     RELAYS,
     [
       {
-        kinds: [0],
+    kinds: [0],
         authors: authors.map(String),
       },
     ],
@@ -172,16 +185,19 @@ export async function send(
   relays: string[] = RELAYS
 ) {
   try {
-  const evt: EventTemplate = {
+    const evt: EventTemplate = {
       kind: Number(kind),
       created_at: Math.floor(Date.now() / 1000),
       tags: Array.isArray(tags) ? tags : [],
       content: String(content ?? ''),
     }
+    console.info('[nostr] sending event', { pubkeyHex, kind, content, tags, relays })
     const sk = hexToBytes(String(privkeyHex))
-    const signed = finalizeEvent(evt, sk)
-    // Fire-and-forget publish to all relays; don't await acks to keep UI snappy
-    pool.publish(relays && relays.length ? relays : RELAYS, signed)
+    const rels = relays && relays.length ? relays : RELAYS
+    const signed = finalizeEvent({ ...evt }, sk)
+    const pubs = toPromises(pool.publish(rels, signed) as any)
+   // Fire-and-forget: log failures but don't block UI
+    for (const p of pubs) p.catch((e: any) => console.warn('[nostr] publish error:', e?.message ?? e))
   } catch (e) {
     console.warn('[nostr] send failed', e)
   }
@@ -220,7 +236,8 @@ export async function getProfileHashPerRelay(
     relays.map((relay) =>
       new Promise<void>((resolve) => {
         let latest: any | null = null
-        let resolved = false
+        let resolved = false;
+        console.info('[nostr] fetching profile hash for', pubkeyHex, 'from relay', relay);
         const sub = pool.subscribeMany(
           [relay],
           [

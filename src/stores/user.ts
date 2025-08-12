@@ -88,12 +88,8 @@ export const useUserStore = defineStore('user', () => {
     }
     profile.value = p
     await saveProfile(p)
-    // Immediately publish new profile to Nostr
-    try {
-      await publishProfileToNostr()
-    } catch (e) {
-      console.warn('[user] initial Nostr profile publish failed', e)
-    }
+  // Trigger initial publish via scheduler (no direct publish)
+  scheduleProfileSync('initial-publish', 0)
     return p
   }
 
@@ -148,12 +144,13 @@ export const useUserStore = defineStore('user', () => {
   }
 
   // Publish the current profile metadata to Nostr (kind 0), verifying per-relay hash and re-publishing if needed
-  async function publishProfileToNostr() {
+  // Internal: should only be invoked by scheduleProfileSync
+  async function doPublishProfileToNostr(reason: string) {
     const p = await ensureUser()
     const meta = currentMetadata()
     const localHash = await computeMetadataHash(meta)
 
-    // Ask each relay for our latest kind:0 and compute its hash
+  // Ask each relay for our latest kind:0 and compute its hash
     let remoteHashes: Record<string, string | null> = {}
     try {
       remoteHashes = await getProfileHashPerRelay(p.pubkeyHex, NOSTR_RELAYS, 3000)
@@ -161,7 +158,7 @@ export const useUserStore = defineStore('user', () => {
       console.warn('[user] getProfileHashPerRelay failed', e)
     }
 
-    console.log('[user] got hashes from relays', remoteHashes)
+    console.log('[user] got hashes from relays', {remoteHashes, reason})
 
     // Determine which relays need an update
     const needUpdate: string[] = []
@@ -186,7 +183,7 @@ export const useUserStore = defineStore('user', () => {
     if (syncTimer) window.clearTimeout(syncTimer)
     syncTimer = window.setTimeout(() => {
       syncTimer = null
-      void publishProfileToNostr()
+      void doPublishProfileToNostr(reason)
     }, delayMs)
   }
 
@@ -203,7 +200,7 @@ export const useUserStore = defineStore('user', () => {
     // run once shortly after init, then every hour
     scheduleProfileSync('hourly-initial', 1000)
     if (hourlyTimer) window.clearInterval(hourlyTimer)
-    hourlyTimer = window.setInterval(() => void publishProfileToNostr(), 60 * 60 * 1000)
+  hourlyTimer = window.setInterval(() => scheduleProfileSync('hourly-tick'), 60 * 60 * 1000)
   }
 
   function getPubKey(): string | null { return pubkey.value }
@@ -216,16 +213,15 @@ export const useUserStore = defineStore('user', () => {
     profile,
     ensureUser,
     // getters for other modules
-  pubkey,
-  privkey,
-    nickname,
-  avatarSeed,
-  avatarDataUri,
-  avatarSvg,
-  getPubKey,
-  getPrivKey,
-  regenerateAvatarSeed,
-  updateNickname,
-  publishProfileToNostr,
+    pubkey,
+    privkey,
+      nickname,
+    avatarSeed,
+    avatarDataUri,
+    avatarSvg,
+    getPubKey,
+    getPrivKey,
+    regenerateAvatarSeed,
+    updateNickname,
   }
 })
