@@ -49,7 +49,7 @@ export function subscribeTag(tag: string, onEvent?: (event: NostrEvent, relay?: 
     {
       onevent: (evt) => {
         if (onEvent) onEvent(evt)
-        else console.debug('[nostr] event', tag, evt)
+        else console.log('[nostr] event', tag, evt)
       },
       oneose: () => {
         // End-of-stored-events marker from relays; keep subscription open for future events

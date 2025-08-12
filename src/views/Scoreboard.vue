@@ -1,5 +1,16 @@
 <template>
-  <div class="p-4 space-y-6">
+  <!-- Not found state -->
+  <div v-if="notFound" class="p-4">
+    <div class="max-w-screen-sm mx-auto text-center space-y-4 py-16">
+      <h1 class="text-2xl font-semibold">Scoreboard not found</h1>
+      <p class="text-sm text-muted-foreground">We couldn't find a scoreboard with ID <span class="font-mono">{{ id }}</span> on this device.</p>
+      <div class="flex items-center justify-center gap-3">
+        <Button @click="goCreate">Create new one</Button>
+      </div>
+    </div>
+  </div>
+
+  <div v-else class="p-4 space-y-6">
     <div class="flex items-start justify-between gap-2">
       <div>
         <h1 class="text-2xl font-semibold">{{ scoreboard?.name ?? 'Scoreboard' }}</h1>
@@ -187,6 +198,13 @@ const store = useScoreboardsStore()
 const user = useUserStore()
 const scoreboard = computed(() => store.items.find((s) => s.id === id.value))
 
+// Wait for store hydration so we don't show a false negative before IndexedDB loads
+const ready = ref(false)
+onMounted(async () => {
+  try { await store.ensureLoaded() } finally { ready.value = true }
+})
+const notFound = computed(() => ready.value && !scoreboard.value && !!id.value)
+
 const drawerOpen = ref(false)
 const inviteOpen = ref(false)
 const settingsOpen = ref(false)
@@ -256,7 +274,9 @@ function rejectJoin(reqId: string) {
 // Settings data: owner + members
 const profiles = useProfilesStore()
 const ownerProfile = computed(() => {
+  console.log('[profiles] get owner profile for', { id: scoreboard.value?.id, pubkey: scoreboard.value?.authorPubKey })
   const pub = scoreboard.value?.authorPubKey || ''
+  console.log('[profiles] get', { pub })
   return pub ? profiles.get(pub) : null
 })
 const members = computed(() => {
@@ -267,4 +287,8 @@ const members = computed(() => {
 })
 
 function short(pk: string) { return (pk || '').slice(0, 8) }
+
+function goCreate() {
+  router.push({ name: 'new-scoreboard' })
+}
 </script>

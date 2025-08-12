@@ -75,6 +75,7 @@ export const useProfilesStore = defineStore('profiles', () => {
     try {
       const user = useUserStore()
       const myPub = user.getPubKey()
+      console.log('[profiles] get', { pubkey, myPub, user })
       if (myPub && pubkey === myPub) {
         const name = user.nickname || ''
         const picture = user.avatarDataUri || ''
@@ -85,7 +86,9 @@ export const useProfilesStore = defineStore('profiles', () => {
           updatedAt: Date.now(),
         }
       }
-    } catch {}
+    } catch (e) {
+      console.error(`[profiles] get failed by pub ${pubkey}`, e)
+    }
     return profiles.value.get(pubkey) || null
   }
 

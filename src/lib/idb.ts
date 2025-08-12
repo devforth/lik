@@ -60,6 +60,17 @@ function txDone(tx: IDBTransaction): Promise<void> {
   })
 }
 
+// Ensure the value is free of Vue proxies or other non-cloneables before IDB put
+function toStorable<T>(value: T): T {
+  try {
+    // JSON clone is sufficient for our simple data (strings/numbers/arrays/objects)
+    return JSON.parse(JSON.stringify(value)) as T
+  } catch {
+    // Fallback: return as-is; IDB may still throw, but we tried
+    return value
+  }
+}
+
 export async function dbGetAll<T = any>(storeName: string): Promise<T[]> {
   const db = await openDatabase()
   return new Promise((resolve, reject) => {
@@ -75,7 +86,7 @@ export async function dbPut(storeName: string, value: any): Promise<void> {
   const db = await openDatabase()
   const tx = db.transaction(storeName, 'readwrite')
   const store = tx.objectStore(storeName)
-  store.put(value)
+  store.put(toStorable(value))
   await txDone(tx)
 }
 
@@ -84,7 +95,7 @@ export async function dbBulkPut(storeName: string, values: any[]): Promise<void>
   const db = await openDatabase()
   const tx = db.transaction(storeName, 'readwrite')
   const store = tx.objectStore(storeName)
-  for (const v of values) store.put(v)
+  for (const v of values) store.put(toStorable(v))
   await txDone(tx)
 }
 
