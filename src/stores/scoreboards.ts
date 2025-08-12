@@ -30,8 +30,6 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   let initPromise: Promise<void> | null = null
 
   // IndexedDB helpers (lazy)
-  const DB_NAME = 'appdb'
-  const DB_VERSION = 3
   const STORE = 'scoreboards'
   const REJECT_STORE = 'rejectedScoreboardRequests'
   // no local ensureDb; use lib/idb.ts
