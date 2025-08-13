@@ -65,7 +65,22 @@
               <!-- Category name row -->
               <tr>
                 <td :colspan="Math.max(1, members.length)" class="pt-4 pb-2">
-                  <div class="text-sm font-semibold">{{ cat.value.name || 'Untitled category' }}</div>
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="text-sm font-semibold">{{ cat.value.name || 'Untitled category' }}</div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger as-child>
+                        <Button variant="ghost" size="icon" class="h-7 w-7">
+                          <MoreVertical class="h-4 w-4" />
+                          <span class="sr-only">Open category menu</span>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" class="w-40">
+                        <DropdownMenuItem @click="openRenameCategory(cat.key, cat.value.name || '')">
+                          <span>Rename</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </td>
               </tr>
               <!-- Counters row -->
@@ -249,6 +264,32 @@
       </div>
     </DrawerContent>
   </Drawer>
+
+  <!-- Rename category drawer -->
+  <Drawer v-model:open="renameOpen">
+    <DrawerContent>
+      <div class="mx-auto w-full max-w-sm">
+        <DrawerHeader>
+          <DrawerTitle>Rename category</DrawerTitle>
+          <DrawerDescription>Update the category name.</DrawerDescription>
+        </DrawerHeader>
+
+        <form class="px-4 pb-2 space-y-4" @submit.prevent="renameCategory">
+          <div class="space-y-2">
+            <label class="text-sm" for="rename-category-name">Category name</label>
+            <Input id="rename-category-name" v-model="renameCategoryName" placeholder="Category name" ref="renameInputRef" />
+          </div>
+        </form>
+
+        <DrawerFooter>
+          <Button :disabled="!renameCategoryName.trim()" @click="renameCategory">Save</Button>
+          <DrawerClose as-child>
+            <Button variant="outline">Cancel</Button>
+          </DrawerClose>
+        </DrawerFooter>
+      </div>
+    </DrawerContent>
+  </Drawer>
 </template>
 
 <script setup lang="ts">
@@ -277,7 +318,7 @@ import { Input } from '@/components/ui/input'
 import QrcodeVue from 'qrcode.vue'
 import { useProfilesStore } from '@/stores/profiles'
 import shortId from '@/lib/utils'
-import { addCategory as addCategoryCRDT, addScore as addScoreCRDT, subscribeToBoard as subscribeCRDT } from '@/nostrToCRDT'
+import { addCategory as addCategoryCRDT, addScore as addScoreCRDT, subscribeToBoard as subscribeCRDT, editCat as editCatCRDT } from '@/nostrToCRDT'
 const route = useRoute()
 const router = useRouter()
 const id = computed(() => String(route.params.id || ''))
@@ -306,6 +347,12 @@ const createOpen = ref(false)
 const newCategoryName = ref('')
 const createInputRef = ref<any>(null)
 
+// Rename category drawer state
+const renameOpen = ref(false)
+const renameCategoryId = ref('')
+const renameCategoryName = ref('')
+const renameInputRef = ref<any>(null)
+
 // Remember last open scoreboard
 watch(
   id,
@@ -327,6 +374,11 @@ function openSettings() {
 function openCreateCategory() {
   newCategoryName.value = ''
   createOpen.value = true
+}
+function openRenameCategory(cid: string, currentName: string) {
+  renameCategoryId.value = cid
+  renameCategoryName.value = currentName
+  renameOpen.value = true
 }
 async function confirmDelete() {
   if (!id.value) return
@@ -375,6 +427,21 @@ function createCategory() {
     addCategoryCRDT(id.value, cid, name)
     createOpen.value = false
     newCategoryName.value = ''
+  } catch (e) {
+    // noop
+  }
+}
+
+// Rename category action
+function renameCategory() {
+  const name = renameCategoryName.value.trim()
+  const cid = renameCategoryId.value
+  if (!id.value || !cid || !name) return
+  try {
+    editCatCRDT(id.value, cid, name)
+    renameOpen.value = false
+    renameCategoryId.value = ''
+    renameCategoryName.value = ''
   } catch (e) {
     // noop
   }
@@ -473,6 +540,19 @@ watch(createOpen, (open) => {
         createInputRef.value.focus()
       } else if (createInputRef.value?.el?.focus) {
         createInputRef.value.el.focus()
+      }
+    })
+  }
+})
+
+// Autofocus the rename input when the drawer opens
+watch(renameOpen, (open) => {
+  if (open) {
+    nextTick(() => {
+      if (renameInputRef.value?.focus) {
+        renameInputRef.value.focus()
+      } else if (renameInputRef.value?.el?.focus) {
+        renameInputRef.value.el.focus()
       }
     })
   }

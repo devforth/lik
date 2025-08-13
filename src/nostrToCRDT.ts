@@ -105,4 +105,29 @@ export function addCategory(boardId: string, id: string, name: string): EndingSt
   return merged
 }
 
-export default { subscribeToBoard, addScore, addCategory }
+/**
+ * Rename existing category and persist + publish changes.
+ * Uses CRDT.renameCategory to produce a delta, merges it into current snapshot,
+ * then stores and publishes the new snapshot.
+ */
+export function editCat(boardId: string, id: string, name: string): EndingState | null {
+  const store = useScoreboardsStore()
+  const me = useUserStore().getPubKey()
+  if (!me) throw new Error('No pubkey available')
+  const board = store.items.find((s) => s.id === boardId)
+  if (!board) return null
+
+  // Create delta with just the rename, which also ensures the category exists if missing
+  const deltaCrdt = new ScoreboardCRDT(me)
+  const afterRename = deltaCrdt.renameCategory(id, name)
+
+  // Merge into current state
+  const baseCrdt = new ScoreboardCRDT(me, board.snapshot || undefined)
+  const merged = baseCrdt.merge(afterRename)
+
+  void store.updateSnapshot(boardId, merged)
+  void publishSnapshot(boardId, merged)
+  return merged
+}
+
+export default { subscribeToBoard, addScore, addCategory, editCat }

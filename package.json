@@ -11,7 +11,8 @@
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
-    "type-check": "vue-tsc --build"
+    "type-check": "vue-tsc --build",
+    "gen-icon": "npx capacitor-assets generate"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.2",
@@ -38,6 +39,7 @@
     "vue-sonner": "^2.0.2"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^7.4.2",
     "@tsconfig/node22": "^22.0.2",
     "@types/node": "^22.16.5",
