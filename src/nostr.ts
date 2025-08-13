@@ -203,6 +203,21 @@ export async function send(
   }
 }
 
+// PRE kind constant (parameterized replaceable event)
+export const KIND_PRE = 30078
+
+/** Send a PRE (kind 30078) with a d-tag and JSON payload. */
+export async function sendPRE(
+  pubkeyHex: string,
+  privkeyHex: string,
+  dTag: string,
+  payload: any,
+  relays: string[] = RELAYS
+) {
+  const content = JSON.stringify(payload ?? {})
+  return send(pubkeyHex, privkeyHex, KIND_PRE, content, [[ 'd', String(dTag) ]], relays)
+}
+
 /**
  * Helper to publish a Nostr profile (kind 0) with basic fields.
  * Not strictly required by the app, but handy for store usage.
@@ -294,6 +309,132 @@ export async function getProfileHashPerRelay(
   return results
 }
 
+/**
+ * Fetch the latest PRE (kind 30078) for a d-tag from each relay and return relay->hash.
+ * If authors provided, use it to narrow result set.
+ */
+export async function getPREHashPerRelay(
+  dTag: string,
+  authors?: string[] | null,
+  relays: string[] = RELAYS,
+  timeoutMs = 3000
+): Promise<Record<string, string | null>> {
+  const results: Record<string, string | null> = {}
+
+  await Promise.all(
+    relays.map((relay) =>
+      new Promise<void>((resolve) => {
+        let latest: any | null = null
+        let resolved = false
+        const filter: any = { kinds: [KIND_PRE], '#d': [String(dTag)] }
+        if (authors && authors.length) filter.authors = authors.map(String)
+        const sub = pool.subscribeMany(
+          [relay],
+          [ filter ],
+          {
+            onevent: (evt) => {
+              if (!latest || Number(evt?.created_at || 0) > Number(latest?.created_at || 0)) latest = evt
+            },
+            oneose: async () => {
+              if (resolved) return
+              try {
+                if (latest && typeof latest.content === 'string') {
+                  let parsed: any
+                  try { parsed = JSON.parse(latest.content) } catch { parsed = latest.content }
+                  const canon = canonicalJSONStringify(parsed)
+                  results[relay] = await sha256Hex(canon)
+                } else {
+                  results[relay] = null
+                }
+              } catch {
+                results[relay] = null
+              } finally {
+                try { sub.close() } catch {}
+                resolved = true
+                resolve()
+              }
+            },
+          }
+        )
+        setTimeout(() => {
+          if (resolved) return
+          try { sub.close() } catch {}
+          results[relay] = latest ? null : null
+          resolved = true
+          resolve()
+        }, timeoutMs)
+      })
+    )
+  )
+
+  return results
+}
+
+/**
+ * Publish a PRE payload only to relays that need it (based on hash comparison).
+ */
+export async function publishPREToRelays(
+  pubkeyHex: string,
+  privkeyHex: string,
+  dTag: string,
+  payload: any,
+  relays: string[] = RELAYS
+) {
+  const hashes = await getPREHashPerRelay(dTag, [pubkeyHex], relays, 3000)
+  let need: string[] = []
+  try {
+    const canon = canonicalJSONStringify(payload ?? {})
+    const localHash = await sha256Hex(canon)
+    need = relays.filter((r) => !hashes[r] || hashes[r] !== localHash)
+  } catch {
+    need = relays.slice()
+  }
+  if (!need.length) return
+  return sendPRE(pubkeyHex, privkeyHex, dTag, payload, need)
+}
+
+/** Fetch the latest PRE by d-tag across relays; returns latest event and relay. */
+export async function fetchLatestPREByDTag(
+  dTag: string,
+  relays: string[] = RELAYS,
+  timeoutMs = 3000
+): Promise<{ event: any | null; relay: string | null }> {
+  let latest: any | null = null
+  let latestRelay: string | null = null
+  await Promise.all(
+    relays.map((relay) =>
+      new Promise<void>((resolve) => {
+        let resolved = false
+        const sub = pool.subscribeMany(
+          [relay],
+          [ { kinds: [KIND_PRE], '#d': [String(dTag)] } as any ],
+          {
+            onevent: (evt) => {
+              if (!latest || Number(evt?.created_at || 0) > Number(latest?.created_at || 0)) {
+                latest = evt
+                latestRelay = relay
+              }
+            },
+            oneose: () => {
+              if (resolved) return
+              try { sub.close() } catch {}
+              resolved = true
+              resolve()
+            },
+          }
+        )
+        setTimeout(() => {
+          if (resolved) return
+          try { sub.close() } catch {}
+          resolved = true
+          resolve()
+        }, timeoutMs)
+      })
+    )
+  )
+  return { event: latest, relay: latestRelay }
+}
+
 // Re-export helpers for convenience/compat with previous imports
 export { canonicalJSONStringify, sha256Hex, computeMetadataHash } from '@/lib/utils'
 
@@ -302,11 +443,15 @@ export default {
   subscribeTag,
   subscribeProfiles,
   send,
+  sendPRE,
   publishProfile,
   publishProfileToRelays,
   canonicalJSONStringify,
   sha256Hex,
   computeMetadataHash,
   getProfileHashPerRelay,
+  getPREHashPerRelay,
+  publishPREToRelays,
+  fetchLatestPREByDTag,
   fetchLatestProfile,
 }

@@ -2,20 +2,30 @@
 
 import { SimplePool } from 'nostr-tools/pool'
 import type { Filter } from 'nostr-tools'
-import { RELAYS } from '@/nostr'
+import { RELAYS, sendPRE } from '@/nostr'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { ScoreboardCRDT, type EndingState } from '@/crdt'
 import { useUserStore } from '@/stores/user'
 
 const pool = new SimplePool()
 const active = new Map<string, { close: () => void }>()
+async function publishSnapshot(boardId: string, state: EndingState) {
+  try {
+    const user = useUserStore()
+    const p = await user.ensureUser()
+    const tagD = `lik::crdt::${boardId}`
+    await sendPRE(p.pubkeyHex, p.privkeyHex, tagD, state)
+  } catch (e) {
+    // non-fatal
+  }
+}
 
 /**
  * Subscribe to PRE with #d "crdt::<boardId>" and authors filter of all pubkeys except own.
  * On events, parse snapshot JSON and merge into local board snapshot, persist in IDB via store.
  */
 export function subscribeToBoard(boardId: string, pubkeys: string[]) {
-  const tagD = `crdt::${boardId}`
+  const tagD = `lik::crdt::${boardId}`
   const me = useUserStore().getPubKey()
   if (!me) throw new Error('No pubkey available')
   const authors = (Array.isArray(pubkeys) ? pubkeys : []).map(String).filter((p) => p && p !== me)
@@ -37,10 +47,10 @@ export function subscribeToBoard(boardId: string, pubkeys: string[]) {
         const store = useScoreboardsStore()
         const board = store.items.find((s) => s.id === boardId)
         if (!board) return
-  const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
+        const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
         const next = crdt.merge(remote)
-  // persist merged snapshot via store (IndexedDB)
-  void store.updateSnapshot(boardId, next)
+        // persist merged snapshot via store (IndexedDB)
+        void store.updateSnapshot(boardId, next)
       } catch {}
     },
     oneose: () => {
@@ -64,6 +74,8 @@ export function addScore(boardId: string, categoryKey: string, userPubKey: strin
   const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
   const next = crdt.addScore(categoryKey, userPubKey, delta)
   void store.updateSnapshot(boardId, next)
+  // Publish PRE snapshot for others to merge
+  void publishSnapshot(boardId, next)
   return next
 }
 
@@ -88,6 +100,8 @@ export function addCategory(boardId: string, id: string, name: string): EndingSt
 
   // Persist via store method
   void store.updateSnapshot(boardId, merged)
+  // Publish PRE snapshot for others to merge
+  void publishSnapshot(boardId, merged)
   return merged
 }
 

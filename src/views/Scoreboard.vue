@@ -14,7 +14,6 @@
     <div class="flex items-start justify-between gap-2">
       <div>
         <h1 class="text-2xl font-semibold">{{ scoreboard?.name ?? 'Scoreboard' }}</h1>
-        <div class="text-xs text-gray-500 mt-2">UUID: {{ id }}</div>
       </div>
 
       <!-- Actions: kebab menu -->
@@ -237,7 +236,7 @@
         <form class="px-4 pb-2 space-y-4" @submit.prevent="createCategory">
           <div class="space-y-2">
             <label class="text-sm" for="category-name">Category name</label>
-            <Input id="category-name" v-model="newCategoryName" placeholder="e.g., Bugs fixed" />
+            <Input id="category-name" v-model="newCategoryName" placeholder="e.g., Bugs fixed" ref="createInputRef" />
           </div>
         </form>
 
@@ -253,7 +252,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { useUserStore } from '@/stores/user'
@@ -278,7 +277,7 @@ import { Input } from '@/components/ui/input'
 import QrcodeVue from 'qrcode.vue'
 import { useProfilesStore } from '@/stores/profiles'
 import shortId from '@/lib/utils'
-import { addCategory as addCategoryCRDT, addScore as addScoreCRDT } from '@/nostrToCRDT'
+import { addCategory as addCategoryCRDT, addScore as addScoreCRDT, subscribeToBoard as subscribeCRDT } from '@/nostrToCRDT'
 const route = useRoute()
 const router = useRouter()
 const id = computed(() => String(route.params.id || ''))
@@ -305,6 +304,7 @@ const CLIPBOARD_KEY = 'lik:lastCopiedBoardId'
 // Create category drawer state
 const createOpen = ref(false)
 const newCategoryName = ref('')
+const createInputRef = ref<any>(null)
 
 // Remember last open scoreboard
 watch(
@@ -429,4 +429,52 @@ function short(pk: string) { return (pk || '').slice(0, 8) }
 function goCreate() {
   router.push({ name: 'new-scoreboard' })
 }
+
+// On mount: if owner, verify board PRE exists across relays; else subscribe to board metadata PRE; also subscribe to CRDT PRE for updates.
+let unsubCRDT: null | (() => void) = null
+let unsubBRD: null | (() => void) = null
+watch(
+  () => [ready.value, id.value, scoreboard.value?.members, user.getPubKey()],
+  async () => {
+    if (!ready.value || !id.value || !scoreboard.value) return
+    // Owner ensures board PRE published everywhere (name/owner/members)
+    if (isOwner.value) {
+      try { await store.verifyBoardPREEverywhere(id.value) } catch {}
+      // if previously subscribed as non-owner, clean it up
+      if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
+    }
+    // Non-owner: subscribe to board metadata updates
+    if (!isOwner.value) {
+      if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
+      try {
+        store.subscribeBoardMeta(id.value, scoreboard.value.authorPubKey)
+        // store manages its own unsubscribe map; we keep a no-op handle to align lifecycle
+        unsubBRD = () => store.unsubscribeBoardMeta(id.value)
+      } catch {}
+    }
+    // Subscribe to CRDT updates from all members except self
+    if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
+    const members = Array.isArray(scoreboard.value.members) ? scoreboard.value.members : []
+    try { unsubCRDT = subscribeCRDT(id.value, members) } catch {}
+  },
+  { immediate: true, deep: true }
+)
+
+onBeforeUnmount(() => {
+  if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
+  if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
+})
+
+// Autofocus the category input when the drawer opens
+watch(createOpen, (open) => {
+  if (open) {
+    nextTick(() => {
+      if (createInputRef.value?.focus) {
+        createInputRef.value.focus()
+      } else if (createInputRef.value?.el?.focus) {
+        createInputRef.value.el.focus()
+      }
+    })
+  }
+})
 </script>

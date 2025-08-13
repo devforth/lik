@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { HTMLAttributes } from "vue"
+import { ref, type HTMLAttributes } from "vue"
 import { useVModel } from "@vueuse/core"
 import { cn } from "@/lib/utils"
 
@@ -17,10 +17,18 @@ const modelValue = useVModel(props, "modelValue", emits, {
   passive: true,
   defaultValue: props.defaultValue,
 })
+
+// Expose focus control to parent components
+const inputEl = ref<HTMLInputElement | null>(null)
+defineExpose({
+  focus: () => inputEl.value?.focus(),
+  el: inputEl,
+})
 </script>
 
 <template>
   <input
+    ref="inputEl"
     v-model="modelValue"
     data-slot="input"
     :class="cn(

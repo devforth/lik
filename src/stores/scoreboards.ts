@@ -1,11 +1,13 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { nowUtc } from '@/time-sync'
-import { subscribeTag, send as nostrSend, fetchLatestProfile } from '@/nostr'
+import { subscribeTag, send as nostrSend, fetchLatestProfile, publishPREToRelays, fetchLatestPREByDTag, RELAYS } from '@/nostr'
+import { SimplePool } from 'nostr-tools/pool'
 import { useUserStore } from '@/stores/user'
 import { toast } from 'vue-sonner'
 import { useProfilesStore } from '@/stores/profiles'
 import { dbGetAll, dbBulkPut, dbDelete, dbPut } from '@/lib/idb'
+import { subscribeToBoard as subscribeCRDT } from '@/nostrToCRDT'
 
 export interface Scoreboard {
   id: string
@@ -22,6 +24,12 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   const items = ref<Scoreboard[]>([])
   // nostr subscriptions cleanup map
   const unsubById = new Map<string, () => void>()
+  // CRDT PRE subscriptions by board id
+  const crdtUnsubById = new Map<string, () => void>()
+  // Board metadata PRE subscriptions by board id
+  const brdUnsubById = new Map<string, () => void>()
+  const brdPool = new SimplePool()
+  const KIND_PRE = 30078
   // last join requests per scoreboard id
   const lastRequests = ref<Record<string, JoinReq[]>>({})
   // blacklist of rejected join request ids with TTL
@@ -30,6 +38,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   let hydrating = false
   // expose a readiness promise to let router/pages wait for initial load
   let initPromise: Promise<void> | null = null
+  // track serialized signature of board fields to detect changes
+  const boardSig = new Map<string, string>()
 
   // IndexedDB helpers (lazy)
   const STORE = 'scoreboards'
@@ -121,6 +131,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     void saveAll(items.value)
     // subscribe to join requests for this scoreboard
     subscribeJoinTagFor(id)
+  // Owner publishes board metadata PRE to ensure availability
+  void ensureBoardPREPublished(id).catch(() => {})
     return sb
   }
 
@@ -164,6 +176,47 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     }
   }
 
+  // ---------- Board PRE (lik::brd::<id>) helpers ----------
+  type BoardPRE = { id: string; name: string; owner: string; members: string[] }
+  function buildBoardPREPayload(boardId: string): BoardPRE | null {
+    const sb = items.value.find((s) => s.id === boardId)
+    if (!sb) return null
+    return {
+      id: sb.id,
+      name: sb.name,
+      owner: sb.authorPubKey,
+      members: Array.isArray(sb.members) ? sb.members.slice() : [],
+    }
+  }
+
+  async function ensureBoardPREPublished(boardId: string) {
+    const user = useUserStore()
+    const me = user.getPubKey()
+    const sb = items.value.find((s) => s.id === boardId)
+    if (!sb || !me) return
+    if (sb.authorPubKey !== me) return // only owner publishes
+    const p = await user.ensureUser()
+    const tag = `lik::brd::${boardId}`
+    const payload = buildBoardPREPayload(boardId)
+    if (!payload) return
+    try {
+      await publishPREToRelays(p.pubkeyHex, p.privkeyHex, tag, payload, RELAYS)
+    } catch (e) {
+      console.warn('[scoreboards] ensureBoardPREPublished failed', e)
+    }
+  }
+
+  /** On scoreboard mount: if PRE exists but missing on some relays, republish to them. */
+  async function verifyBoardPREEverywhere(boardId: string) {
+    const sb = items.value.find((s) => s.id === boardId)
+    const me = useUserStore().getPubKey()
+    if (!sb || !me) return
+    const tag = `lik::brd::${boardId}`
+    // Non-owner can't publish; just no-op
+    if (sb.authorPubKey !== me) return
+    await ensureBoardPREPublished(boardId)
+  }
+
   // hydrate from IndexedDB on first use
   initPromise = (async () => {
     hydrating = true
@@ -199,6 +252,31 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       saveTimer = setTimeout(() => {
         void saveAll(list)
       }, 200)
+    },
+    { deep: true }
+  )
+
+  // Auto-publish board PRE by owner when name/members change
+  let preTimer: ReturnType<typeof setTimeout> | null = null
+  watch(
+    items,
+    () => {
+      if (hydrating) return
+      if (preTimer) clearTimeout(preTimer)
+      preTimer = setTimeout(() => {
+        try {
+          const me = useUserStore().getPubKey()
+          for (const sb of items.value) {
+            if (!me || sb.authorPubKey !== me) continue
+            const sig = JSON.stringify({ n: sb.name, o: sb.authorPubKey, m: (sb.members || []).slice().sort() })
+            const prev = boardSig.get(sb.id)
+            if (sig !== prev) {
+              boardSig.set(sb.id, sig)
+              void ensureBoardPREPublished(sb.id)
+            }
+          }
+        } catch {}
+      }, 300)
     },
     { deep: true }
   )
@@ -273,6 +351,84 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     }
   }
 
+  // CRDT subscriptions management
+  function subscribeBoardCRDT(boardId: string) {
+    // close existing
+    if (crdtUnsubById.has(boardId)) {
+      try { crdtUnsubById.get(boardId)!() } catch {}
+      crdtUnsubById.delete(boardId)
+    }
+    const sb = items.value.find((s) => s.id === boardId)
+    if (!sb) return
+    const members = Array.isArray(sb.members) ? sb.members : []
+    try {
+      const unsub = subscribeCRDT(boardId, members)
+      crdtUnsubById.set(boardId, unsub)
+    } catch {}
+  }
+
+  function unsubscribeBoardCRDT(boardId: string) {
+    if (!crdtUnsubById.has(boardId)) return
+    try { crdtUnsubById.get(boardId)!() } catch {}
+    crdtUnsubById.delete(boardId)
+  }
+
+  function stopAllCRDTSubscriptions() {
+    for (const [id, fn] of crdtUnsubById.entries()) {
+      try { fn() } catch {}
+      crdtUnsubById.delete(id)
+    }
+  }
+
+  // Board metadata PRE subscription
+  function subscribeBoardMeta(boardId: string, ownerPubkey?: string) {
+    if (brdUnsubById.has(boardId)) {
+      try { brdUnsubById.get(boardId)!() } catch {}
+      brdUnsubById.delete(boardId)
+    }
+    const dTag = `lik::brd::${boardId}`
+    const filter: any = { kinds: [KIND_PRE], '#d': [dTag] }
+    if (ownerPubkey) filter.authors = [String(ownerPubkey)]
+    const sub = brdPool.subscribeMany(RELAYS, [filter], {
+      onevent: (evt: any) => {
+        try {
+          const content = String(evt?.content || '{}')
+          const meta = JSON.parse(content)
+          const sb = items.value.find((s) => s.id === boardId)
+          if (!sb) return
+          // Update fields if changed
+          const nextName = String(meta?.name || sb.name)
+          const nextOwner = String(meta?.owner || sb.authorPubKey)
+          const nextMembers = Array.isArray(meta?.members) ? meta.members.map(String) : (sb.members || [])
+          let changed = false
+          if (sb.name !== nextName) { sb.name = nextName; changed = true }
+          if (sb.authorPubKey !== nextOwner) { sb.authorPubKey = nextOwner; changed = true }
+          const curMembers = (sb.members || []).slice().sort().join(',')
+          const newMembers = nextMembers.slice().sort().join(',')
+          if (curMembers !== newMembers) { sb.members = nextMembers; changed = true }
+          if (changed) void saveAll(items.value)
+        } catch {}
+      },
+      oneose: () => {
+        // keep open
+      },
+    })
+    brdUnsubById.set(boardId, () => { try { sub.close() } catch {} })
+  }
+
+  function unsubscribeBoardMeta(boardId: string) {
+    if (!brdUnsubById.has(boardId)) return
+    try { brdUnsubById.get(boardId)!() } catch {}
+    brdUnsubById.delete(boardId)
+  }
+
+  function stopAllBoardMetaSubscriptions() {
+    for (const [id, fn] of brdUnsubById.entries()) {
+      try { fn() } catch {}
+      brdUnsubById.delete(id)
+    }
+  }
+
   function isOwner(boardId: string, myPub: string | null): boolean {
     const sb = items.value.find((s) => s.id === boardId)
     if (!sb || !myPub) return false
@@ -284,7 +440,9 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     if (!sb) return
     if (!Array.isArray(sb.members)) sb.members = []
     if (!sb.members.includes(pubkey)) sb.members.push(pubkey)
-    await saveAll(items.value)
+  await saveAll(items.value)
+  // Owner updates should re-publish board PRE
+  void ensureBoardPREPublished(boardId)
     // remove from lastRequests
     const list = lastRequests.value[boardId] || []
     lastRequests.value = { ...lastRequests.value, [boardId]: list.filter((r) => r.id !== eventId) }
@@ -303,13 +461,24 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     lastRequests.value = { ...lastRequests.value, [boardId]: list.filter((r) => r.id !== eventId) }
   }
 
+  async function renameBoard(boardId: string, newName: string) {
+    const n = (newName ?? '').trim()
+    if (!n) return
+    const sb = items.value.find((s) => s.id === boardId)
+    if (!sb) return
+    sb.name = n
+    await saveAll(items.value)
+    // owner refresh publish
+    void ensureBoardPREPublished(boardId)
+  }
+
   /**
    * Join a scoreboard by a code like "lik-<id>".
    * - If the scoreboard is already in user's list and they are the author: show error toast.
    * - If it's already in the list but not authored by the user: show info toast.
    * - Otherwise, send a Nostr join request tagged with lik-sb-join-req-<id>.
    */
-  async function join(code: string): Promise<{ ok: boolean; reason?: 'own' | 'already' | 'bad-code' | 'no-keys' }> {
+  async function join(code: string): Promise<{ ok: boolean; reason?: 'own' | 'already' | 'bad-code' | 'no-keys' | 'bad-meta' }> {
     const raw = String(code || '').trim()
     // Extract scoreboard id from code
     const m = /^lik-([0-9a-fA-F-]{8,})$/.exec(raw)
@@ -345,6 +514,55 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     const tag = `lik-sb-join-req-${id}`
     try {
       await nostrSend(pub, priv, 1, `join-request ${id}`, [[ 't', tag ]])
+      
+      // Immediately fetch two PREs and cache locally:
+      // 1) lik::brd::<id> board metadata (owner publishes)
+      // 2) lik::crdt::<id> snapshot (anyone may publish; we use latest)
+      try {
+        const boardTag = `lik::brd::${id}`
+        const { event: brdEvt } = await fetchLatestPREByDTag(boardTag)
+        if (brdEvt && typeof brdEvt.content === 'string') {
+          try {
+            const meta = JSON.parse(brdEvt.content)
+            if (!meta) {
+              console.error('Invalid board metadata')
+              return { ok: false, reason: 'bad-meta' }
+            }
+            if (!Array.isArray(meta.members)) {
+              return { ok: false, reason: 'bad-meta' }
+            }
+            // We already returned earlier if this board existed; create local placeholder
+            const sb: Scoreboard = {
+              id,
+              name: String(meta.name),
+              createdAt: nowUtc(),
+              authorPubKey: String(meta.owner),
+              members: meta.members.map(String),
+            }
+            items.value.push(sb)
+            // tighten subscription to owner if known
+            subscribeBoardMeta(id, sb.authorPubKey)
+          } catch {}
+        }
+
+        const crdtTag = `lik::crdt::${id}`
+        const { event: crdtEvt } = await fetchLatestPREByDTag(crdtTag)
+        if (crdtEvt && typeof crdtEvt.content === 'string') {
+          try {
+            const snapshot = JSON.parse(crdtEvt.content)
+            const idx = items.value.findIndex((s) => s.id === id)
+            if (idx !== -1) items.value[idx].snapshot = snapshot
+          } catch {}
+        }
+
+        // persist any changes
+        await saveAll(items.value)
+        // subscribe to board CRDT updates immediately
+        subscribeBoardCRDT(id)
+      } catch (e) {
+        console.warn('[scoreboards] join: PRE prefetch failed', e)
+      }
+
       toast.success('Join request sent', { description: `Waiting for approval…` })
       return { ok: true }
     } catch (e) {
@@ -360,14 +578,23 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     addScoreboard,
     deleteScoreboard,
   updateSnapshot,
+    verifyBoardPREEverywhere,
+    ensureBoardPREPublished,
     // allow consumers to await initial load completion
     ensureLoaded: async () => { if (initPromise) await initPromise },
     // nostr helpers
     startJoinSubscriptions,
     stopJoinSubscriptions,
+    subscribeBoardCRDT,
+    unsubscribeBoardCRDT,
+    stopAllCRDTSubscriptions,
+  subscribeBoardMeta,
+  unsubscribeBoardMeta,
+  stopAllBoardMetaSubscriptions,
     join,
   isOwner,
   approve,
   reject,
+  renameBoard,
   }
 })
