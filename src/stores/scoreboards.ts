@@ -112,7 +112,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       name,
       createdAt: nowUtc(),
       authorPubKey,
-      members: [],
+      // include owner as a member immediately for simpler rendering/logic
+      members: authorPubKey ? [authorPubKey] : [],
     }
     items.value.push(sb)
     // persist eagerly for immediate durability

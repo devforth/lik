@@ -42,6 +42,53 @@
       </DropdownMenu>
     </div>
 
+    <!-- Scoreboard table -->
+    <div v-if="scoreboard" class="-mx-4 px-4">
+      <div class="overflow-x-auto">
+        <table class="w-full border-collapse table-fixed">
+          <thead>
+            <tr>
+              <th
+                v-for="m in members"
+                :key="m.pubkey"
+                class="px-2 py-2 text-center text-sm font-medium text-foreground border-b"
+                :style="{ minWidth: '40vw', width: '40vw' }"
+              >
+                <div class="flex items-center justify-center gap-2">
+                  <img :src="m.picture || ''" class="h-8 w-8 rounded-md bg-muted object-cover" alt="avatar" />
+                  <div class="truncate max-w-[32vw]">{{ m.name || short(m.pubkey) }}</div>
+                </div>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="cat in categoriesList" :key="cat.key">
+              <!-- Category name row -->
+              <tr>
+                <td :colspan="Math.max(1, members.length)" class="pt-4 pb-2">
+                  <div class="text-sm font-semibold">{{ cat.value.name || 'Untitled category' }}</div>
+                </td>
+              </tr>
+              <!-- Counters row -->
+              <tr>
+                <td v-for="m in members" :key="m.pubkey + ':' + cat.key" class="pb-4" :style="{ minWidth: '40vw', width: '40vw' }">
+                  <div class="flex items-center justify-center gap-3">
+                    <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, m.pubkey, -1)" aria-label="Decrement">
+                      <ChevronDown class="h-4 w-4" />
+                    </Button>
+                    <div class="min-w-[3ch] text-center tabular-nums">{{ scoreFor(cat.value, m.pubkey) }}</div>
+                    <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, m.pubkey, 1)" aria-label="Increment">
+                      <ChevronUp class="h-4 w-4" />
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
 
 
     <!-- Confirm delete drawer -->
@@ -210,7 +257,7 @@ import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { useUserStore } from '@/stores/user'
-import { MoreVertical, Trash2, QrCode, Copy, Check, Settings, Plus } from 'lucide-vue-next'
+import { MoreVertical, Trash2, QrCode, Copy, Check, Settings, Plus, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -231,7 +278,7 @@ import { Input } from '@/components/ui/input'
 import QrcodeVue from 'qrcode.vue'
 import { useProfilesStore } from '@/stores/profiles'
 import shortId from '@/lib/utils'
-import { addCategory as addCategoryCRDT } from '@/nostrToCRDT'
+import { addCategory as addCategoryCRDT, addScore as addScoreCRDT } from '@/nostrToCRDT'
 const route = useRoute()
 const router = useRouter()
 const id = computed(() => String(route.params.id || ''))
@@ -349,6 +396,33 @@ const members = computed(() => {
     .filter(Boolean)
     .map((pk) => profiles.get(pk) || { pubkey: pk, name: '', picture: '', updatedAt: 0 })
 })
+
+// Categories from snapshot, sorted by order then name, visible only
+const categoriesList = computed(() => {
+  const cats = (scoreboard.value?.snapshot?.categories || {}) as Record<string, any>
+  return Object.entries(cats)
+    .map(([key, value]) => ({ key, value }))
+    .filter((c) => (c.value?.vis ?? 1) === 1)
+    .sort((a, b) => {
+      const ao = Number(a.value?.order ?? 0)
+      const bo = Number(b.value?.order ?? 0)
+      if (ao !== bo) return ao - bo
+      const an = String(a.value?.name || '')
+      const bn = String(b.value?.name || '')
+      return an.localeCompare(bn)
+    })
+})
+
+function scoreFor(cat: any, pubkey: string): number {
+  const p = Number((cat?.state?.P || {})[pubkey] || 0)
+  const n = Number((cat?.state?.N || {})[pubkey] || 0)
+  return p - n
+}
+
+function changeScore(categoryKey: string, pubkey: string, delta: -1 | 1) {
+  if (!id.value) return
+  try { addScoreCRDT(id.value, categoryKey, pubkey, delta) } catch {}
+}
 
 function short(pk: string) { return (pk || '').slice(0, 8) }
 
