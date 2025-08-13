@@ -14,6 +14,8 @@ export interface Scoreboard {
   authorPubKey: string
   // members list of approved pubkeys
   members?: string[]
+  // CRDT snapshot (EndingState) for the board
+  snapshot?: any
 }
 
 export const useScoreboardsStore = defineStore('scoreboards', () => {
@@ -39,7 +41,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       const values: any[] = await dbGetAll<any>(STORE)
       // ensure createdAt is a number and sort asc
       return values
-        .map((v) => ({ id: String(v.id), name: String(v.name), createdAt: Number(v.createdAt), authorPubKey: String(v.authorPubKey || ''), members: Array.isArray(v.members) ? v.members.map(String) : [] }))
+  .map((v) => ({ id: String(v.id), name: String(v.name), createdAt: Number(v.createdAt), authorPubKey: String(v.authorPubKey || ''), members: Array.isArray(v.members) ? v.members.map(String) : [], snapshot: v.snapshot ?? undefined }))
         .sort((a, b) => a.createdAt - b.createdAt)
     } catch (e) {
       console.warn('[scoreboards] loadAll failed', e)
@@ -51,7 +53,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     try {
       await dbBulkPut(
         STORE,
-        list.map((sb) => ({ id: sb.id, name: sb.name, createdAt: sb.createdAt, authorPubKey: sb.authorPubKey, members: Array.isArray(sb.members) ? sb.members : [] }))
+  list.map((sb) => ({ id: sb.id, name: sb.name, createdAt: sb.createdAt, authorPubKey: sb.authorPubKey, members: Array.isArray(sb.members) ? sb.members : [], snapshot: sb.snapshot }))
       )
     } catch (e) {
       console.warn('[scoreboards] saveAll failed', e)
@@ -136,6 +138,29 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     }
 
     return true
+  }
+
+  /**
+   * Update and persist a single scoreboard snapshot explicitly.
+   * Useful for CRDT merges where we want immediate durability without waiting for the watcher.
+   */
+  async function updateSnapshot(id: string, snapshot: any): Promise<void> {
+    const idx = items.value.findIndex((s) => s.id === id)
+    if (idx === -1) return
+    items.value[idx].snapshot = snapshot
+    // Persist only this record to IDB to avoid extra churn
+    try {
+      await dbPut(STORE, {
+        id: items.value[idx].id,
+        name: items.value[idx].name,
+        createdAt: items.value[idx].createdAt,
+        authorPubKey: items.value[idx].authorPubKey,
+        members: Array.isArray(items.value[idx].members) ? items.value[idx].members : [],
+        snapshot: items.value[idx].snapshot,
+      })
+    } catch (e) {
+      console.warn('[scoreboards] updateSnapshot failed', e)
+    }
   }
 
   // hydrate from IndexedDB on first use
@@ -333,6 +358,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   lastRequests,
     addScoreboard,
     deleteScoreboard,
+  updateSnapshot,
     // allow consumers to await initial load completion
     ensureLoaded: async () => { if (initPromise) await initPromise },
     // nostr helpers

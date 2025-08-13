@@ -38,3 +38,19 @@ export async function computeMetadataHash(obj: Record<string, unknown>): Promise
   const canon = canonicalJSONStringify(obj)
   return sha256Hex(canon)
 }
+
+// ---- IDs ----
+
+/**
+ * shortId: short, non-cryptographic id suitable for UI/category ids.
+ * Format: base36 timestamp + 2-3 base36 random chars (e.g., "lmg5s-3k").
+ */
+export function shortId(): string {
+  const ts = Date.now().toString(36)
+  const rand = Math.floor(Math.random() * 36 * 36 * 36)
+    .toString(36)
+    .padStart(3, '0')
+  return `${ts}-${rand}`
+}
+
+export default shortId

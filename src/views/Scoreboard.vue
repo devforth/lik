@@ -163,6 +163,46 @@
       </div>
     </div>
   </div>
+
+  <!-- Floating create-category action -->
+  <div v-if="!notFound" class="pointer-events-none">
+    <Button
+      variant="default"
+      size="icon"
+      class="pointer-events-auto fixed right-4 md:right-6 z-50 h-14 w-14 rounded-full shadow-lg"
+      :class="{ 'bottom-24': isOwner && myRequests.length, 'bottom-6': !(isOwner && myRequests.length) }"
+      aria-label="Add category"
+      @click="openCreateCategory"
+    >
+      <Plus class="h-7 w-7" />
+    </Button>
+  </div>
+
+  <!-- Create category drawer -->
+  <Drawer v-model:open="createOpen">
+    <DrawerContent>
+      <div class="mx-auto w-full max-w-sm">
+        <DrawerHeader>
+          <DrawerTitle>New category</DrawerTitle>
+          <DrawerDescription>Enter a name and create a category.</DrawerDescription>
+        </DrawerHeader>
+
+        <form class="px-4 pb-2 space-y-4" @submit.prevent="createCategory">
+          <div class="space-y-2">
+            <label class="text-sm" for="category-name">Category name</label>
+            <Input id="category-name" v-model="newCategoryName" placeholder="e.g., Bugs fixed" />
+          </div>
+        </form>
+
+        <DrawerFooter>
+          <Button :disabled="!newCategoryName.trim()" @click="createCategory">Create</Button>
+          <DrawerClose as-child>
+            <Button variant="outline">Cancel</Button>
+          </DrawerClose>
+        </DrawerFooter>
+      </div>
+    </DrawerContent>
+  </Drawer>
 </template>
 
 <script setup lang="ts">
@@ -170,7 +210,7 @@ import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { useUserStore } from '@/stores/user'
-import { MoreVertical, Trash2, QrCode, Copy, Check, Settings } from 'lucide-vue-next'
+import { MoreVertical, Trash2, QrCode, Copy, Check, Settings, Plus } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -190,6 +230,8 @@ import {
 import { Input } from '@/components/ui/input'
 import QrcodeVue from 'qrcode.vue'
 import { useProfilesStore } from '@/stores/profiles'
+import shortId from '@/lib/utils'
+import { addCategory as addCategoryCRDT } from '@/nostrToCRDT'
 const route = useRoute()
 const router = useRouter()
 const id = computed(() => String(route.params.id || ''))
@@ -213,6 +255,10 @@ const boardId = computed(() => (id.value ? `lik-${id.value}` : ''))
 const LAST_KEY = 'lik:lastScoreboardId'
 const CLIPBOARD_KEY = 'lik:lastCopiedBoardId'
 
+// Create category drawer state
+const createOpen = ref(false)
+const newCategoryName = ref('')
+
 // Remember last open scoreboard
 watch(
   id,
@@ -230,6 +276,10 @@ function openInvite() {
 }
 function openSettings() {
   settingsOpen.value = true
+}
+function openCreateCategory() {
+  newCategoryName.value = ''
+  createOpen.value = true
 }
 async function confirmDelete() {
   if (!id.value) return
@@ -267,6 +317,20 @@ function approveJoin(reqId: string, pubkey: string) {
 function rejectJoin(reqId: string) {
   if (!id.value) return
   void store.reject(id.value, reqId)
+}
+
+// Create category action
+function createCategory() {
+  const name = newCategoryName.value.trim()
+  if (!id.value || !name) return
+  const cid = shortId()
+  try {
+    addCategoryCRDT(id.value, cid, name)
+    createOpen.value = false
+    newCategoryName.value = ''
+  } catch (e) {
+    // noop
+  }
 }
 
 // profiles store subscriptions are managed globally by the scoreboards store
