@@ -116,3 +116,20 @@ export async function dbBulkDelete(storeName: string, keys: IDBValidKey[]): Prom
   for (const k of keys) store.delete(k)
   await txDone(tx)
 }
+
+/** Clear all entries from a specific object store. */
+export async function dbClear(storeName: string): Promise<void> {
+  const db = await openDatabase()
+  const tx = db.transaction(storeName, 'readwrite')
+  const store = tx.objectStore(storeName)
+  store.clear()
+  await txDone(tx)
+}
+
+/** Clear all known stores used by the app. Useful for key import resets. */
+export async function dbClearAll(): Promise<void> {
+  const names = Object.keys(STORES)
+  for (const n of names) {
+    try { await dbClear(n) } catch {}
+  }
+}
