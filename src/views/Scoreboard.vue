@@ -24,7 +24,7 @@
             <span class="sr-only">Open menu</span>
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" class="w-44">
+        <DropdownMenuContent align="end" class="w-52">
           <DropdownMenuItem @click="openSettings()">
             <Settings class="h-4 w-4" />
             <span>Settings</span>
@@ -32,6 +32,10 @@
           <DropdownMenuItem @click="openInvite()">
             <QrCode class="h-4 w-4" />
             <span>Invite to board</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem v-if="isOwner" @click="openAddParticipant()">
+            <Plus class="h-4 w-4" />
+            <span>Add participant</span>
           </DropdownMenuItem>
           <DropdownMenuItem variant="destructive" @click="openConfirm()">
             <Trash2 class="h-4 w-4" />
@@ -43,19 +47,30 @@
 
     <!-- Scoreboard table -->
     <div v-if="scoreboard" class="-mx-4 px-4">
-      <div class="overflow-x-auto">
+      <div class="overflow-x-auto relative">
         <table class="w-full border-collapse table-fixed">
           <thead>
             <tr>
               <th
-                v-for="m in members"
-                :key="m.pubkey"
+                v-for="p in participants"
+                :key="p.id"
                 class="px-2 py-2 text-center text-sm font-medium text-foreground border-b"
                 :style="{ minWidth: '40vw', width: '40vw' }"
               >
                 <div class="flex items-center justify-center gap-2">
-                  <img :src="m.picture || ''" class="h-8 w-8 rounded-md bg-muted object-cover" alt="avatar" />
-                  <div class="truncate max-w-[32vw]">{{ m.name || short(m.pubkey) }}</div>
+                  <div class="truncate max-w-[28vw]">{{ p.name }}</div>
+                  <DropdownMenu v-if="isOwner">
+                    <DropdownMenuTrigger as-child>
+                      <Button variant="ghost" size="icon" class="h-7 w-7">
+                        <MoreVertical class="h-4 w-4" />
+                        <span class="sr-only">Open participant menu</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" class="w-40">
+                      <DropdownMenuItem @click="openRenameParticipant(p.id, p.name)">Rename</DropdownMenuItem>
+                      <DropdownMenuItem variant="destructive" @click="openDeleteParticipant(p.id, p.name)">Delete</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </th>
             </tr>
@@ -85,13 +100,13 @@
               </tr>
               <!-- Counters row -->
               <tr>
-                <td v-for="m in members" :key="m.pubkey + ':' + cat.key" class="pb-4" :style="{ minWidth: '40vw', width: '40vw' }">
+                <td v-for="p in participants" :key="p.id + ':' + cat.key" class="pb-4" :style="{ minWidth: '40vw', width: '40vw' }">
                   <div class="flex items-center justify-center gap-3">
-                    <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, m.pubkey, -1)" aria-label="Decrement">
+                    <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, p.id, -1)" aria-label="Decrement">
                       <ChevronDown class="h-4 w-4" />
                     </Button>
-                    <div class="min-w-[3ch] text-center tabular-nums">{{ scoreFor(cat.value, m.pubkey) }}</div>
-                    <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, m.pubkey, 1)" aria-label="Increment">
+                    <div class="min-w-[3ch] text-center tabular-nums">{{ scoreFor(cat.value, p.id) }}</div>
+                    <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, p.id, 1)" aria-label="Increment">
                       <ChevronUp class="h-4 w-4" />
                     </Button>
                   </div>
@@ -290,6 +305,74 @@
       </div>
     </DrawerContent>
   </Drawer>
+
+  <!-- Add participant drawer -->
+  <Drawer v-model:open="addPartOpen">
+    <DrawerContent>
+      <div class="mx-auto w-full max-w-sm">
+        <DrawerHeader>
+          <DrawerTitle>Add participant</DrawerTitle>
+          <DrawerDescription>Create a participant name.</DrawerDescription>
+        </DrawerHeader>
+        <form class="px-4 pb-2 space-y-4" @submit.prevent="addParticipant">
+          <div class="space-y-2">
+            <label class="text-sm" for="participant-name">Name</label>
+            <Input id="participant-name" v-model="newPartName" placeholder="e.g., Carol" ref="addPartInputRef" />
+          </div>
+        </form>
+        <DrawerFooter>
+          <Button :disabled="!newPartName.trim()" @click="addParticipant">Add</Button>
+          <DrawerClose as-child>
+            <Button variant="outline">Cancel</Button>
+          </DrawerClose>
+        </DrawerFooter>
+      </div>
+    </DrawerContent>
+  </Drawer>
+
+  <!-- Rename participant drawer -->
+  <Drawer v-model:open="renamePartOpen">
+    <DrawerContent>
+      <div class="mx-auto w-full max-w-sm">
+        <DrawerHeader>
+          <DrawerTitle>Rename participant</DrawerTitle>
+          <DrawerDescription>Update the participant name.</DrawerDescription>
+        </DrawerHeader>
+        <form class="px-4 pb-2 space-y-4" @submit.prevent="renameParticipant">
+          <div class="space-y-2">
+            <label class="text-sm" for="rename-participant-name">Name</label>
+            <Input id="rename-participant-name" v-model="renamePartName" placeholder="Name" ref="renamePartInputRef" />
+          </div>
+        </form>
+        <DrawerFooter>
+          <Button :disabled="!renamePartName.trim()" @click="renameParticipant">Save</Button>
+          <DrawerClose as-child>
+            <Button variant="outline">Cancel</Button>
+          </DrawerClose>
+        </DrawerFooter>
+      </div>
+    </DrawerContent>
+  </Drawer>
+
+  <!-- Delete participant confirm drawer -->
+  <Drawer v-model:open="deletePartOpen">
+    <DrawerContent>
+      <div class="mx-auto w-full max-w-sm">
+        <DrawerHeader>
+          <DrawerTitle>Delete participant?</DrawerTitle>
+          <DrawerDescription>
+            Deleting participant "{{ deletePartName }}" will remove all their scores from all categories. This cannot be undone.
+          </DrawerDescription>
+        </DrawerHeader>
+        <DrawerFooter>
+          <Button variant="destructive" @click="confirmDeleteParticipant">Yes, delete</Button>
+          <DrawerClose as-child>
+            <Button variant="outline">No, keep</Button>
+          </DrawerClose>
+        </DrawerFooter>
+      </div>
+    </DrawerContent>
+  </Drawer>
 </template>
 
 <script setup lang="ts">
@@ -317,6 +400,7 @@ import {
 import { Input } from '@/components/ui/input'
 import QrcodeVue from 'qrcode.vue'
 import { useProfilesStore } from '@/stores/profiles'
+import { removeParticipantData as removeParticipantDataCRDT } from '@/nostrToCRDT'
 import shortId from '@/lib/utils'
 import { addCategory as addCategoryCRDT, addScore as addScoreCRDT, subscribeToBoard as subscribeCRDT, editCat as editCatCRDT } from '@/nostrToCRDT'
 const route = useRoute()
@@ -326,6 +410,7 @@ const id = computed(() => String(route.params.id || ''))
 const store = useScoreboardsStore()
 const user = useUserStore()
 const scoreboard = computed(() => store.items.find((s) => s.id === id.value))
+const participants = computed(() => scoreboard.value?.participants || [])
 
 // Wait for store hydration so we don't show a false negative before IndexedDB loads
 const ready = ref(false)
@@ -370,6 +455,10 @@ function openInvite() {
 }
 function openSettings() {
   settingsOpen.value = true
+}
+function openAddParticipant() {
+  newPartName.value = ''
+  addPartOpen.value = true
 }
 function openCreateCategory() {
   newCategoryName.value = ''
@@ -480,15 +569,15 @@ const categoriesList = computed(() => {
     })
 })
 
-function scoreFor(cat: any, pubkey: string): number {
-  const p = Number((cat?.state?.P || {})[pubkey] || 0)
-  const n = Number((cat?.state?.N || {})[pubkey] || 0)
+function scoreFor(cat: any, participantId: string): number {
+  const p = Number((cat?.state?.P || {})[participantId] || 0)
+  const n = Number((cat?.state?.N || {})[participantId] || 0)
   return p - n
 }
 
-function changeScore(categoryKey: string, pubkey: string, delta: -1 | 1) {
+function changeScore(categoryKey: string, participantId: string, delta: -1 | 1) {
   if (!id.value) return
-  try { addScoreCRDT(id.value, categoryKey, pubkey, delta) } catch {}
+  try { addScoreCRDT(id.value, categoryKey, participantId, delta) } catch {}
 }
 
 function short(pk: string) { return (pk || '').slice(0, 8) }
@@ -554,6 +643,98 @@ watch(renameOpen, (open) => {
       } else if (renameInputRef.value?.el?.focus) {
         renameInputRef.value.el.focus()
       }
+    })
+  }
+})
+
+// Participants UI state and actions
+const addPartOpen = ref(false)
+const newPartName = ref('')
+const addPartInputRef = ref<any>(null)
+const renamePartOpen = ref(false)
+const renamePartId = ref('')
+const renamePartName = ref('')
+const renamePartInputRef = ref<any>(null)
+const deletePartOpen = ref(false)
+const deletePartId = ref('')
+const deletePartName = ref('')
+
+function addParticipant() {
+  if (!id.value) return
+  const name = newPartName.value.trim()
+  if (!name) return
+  try {
+    if (!scoreboard.value) return
+    const next = [...(scoreboard.value.participants || [])]
+    const newId = (crypto.randomUUID().slice(0, 6))
+    next.push({ id: newId, name })
+    scoreboard.value.participants = next
+  void store.ensureBoardPREPublished(id.value)
+    // owner publishes updated board metadata with participants
+    // persisted by store watcher
+    addPartOpen.value = false
+    newPartName.value = ''
+  } catch {}
+}
+
+function openRenameParticipant(pid: string, current: string) {
+  renamePartId.value = pid
+  renamePartName.value = current
+  renamePartOpen.value = true
+}
+
+async function renameParticipant() {
+  if (!id.value || !renamePartId.value) return
+  const name = renamePartName.value.trim()
+  if (!name) return
+  try {
+    if (!scoreboard.value) return
+    const list = (scoreboard.value.participants || []).map((p) => p.id === renamePartId.value ? { ...p, name } : p)
+    scoreboard.value.participants = list
+  void store.ensureBoardPREPublished(id.value)
+    renamePartOpen.value = false
+    renamePartId.value = ''
+    renamePartName.value = ''
+  } catch {}
+}
+
+function openDeleteParticipant(pid: string, current: string) {
+  deletePartId.value = pid
+  deletePartName.value = current
+  deletePartOpen.value = true
+}
+
+async function confirmDeleteParticipant() {
+  if (!id.value || !deletePartId.value) return
+  try {
+    // Remove scores from CRDT snapshot
+    removeParticipantDataCRDT(id.value, deletePartId.value)
+    // Remove participant from board model
+    if (scoreboard.value) {
+      scoreboard.value.participants = (scoreboard.value.participants || []).filter((p) => p.id !== deletePartId.value)
+  void store.ensureBoardPREPublished(id.value)
+    }
+  } finally {
+    deletePartOpen.value = false
+    deletePartId.value = ''
+    deletePartName.value = ''
+  }
+}
+
+// Autofocus handlers for participant drawers
+watch(addPartOpen, (open) => {
+  if (open) {
+    nextTick(() => {
+      if (addPartInputRef.value?.focus) addPartInputRef.value.focus()
+      else if (addPartInputRef.value?.el?.focus) addPartInputRef.value.el.focus()
+    })
+  }
+})
+watch(renamePartOpen, (open) => {
+  if (open) {
+    nextTick(() => {
+      if (renamePartInputRef.value?.focus) renamePartInputRef.value.focus()
+      else if (renamePartInputRef.value?.el?.focus) renamePartInputRef.value.el.focus()
     })
   }
 })

@@ -65,16 +65,30 @@ export function subscribeToBoard(boardId: string, pubkeys: string[]) {
 /**
  * Convenience method mirroring CRDT.addScore for specific board.
  */
-export function addScore(boardId: string, categoryKey: string, userPubKey: string, delta: -1 | 1): EndingState | null {
+export function addScore(boardId: string, categoryKey: string, participantId: string, delta: -1 | 1): EndingState | null {
   const store = useScoreboardsStore()
   const me = useUserStore().getPubKey()
   if (!me) throw new Error('No pubkey available')
   const board = store.items.find((s) => s.id === boardId)
   if (!board) return null
   const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
-  const next = crdt.addScore(categoryKey, userPubKey, delta)
+  const next = crdt.addScore(categoryKey, participantId, delta)
   void store.updateSnapshot(boardId, next)
   // Publish PRE snapshot for others to merge
+  void publishSnapshot(boardId, next)
+  return next
+}
+
+/** Remove a participant from the CRDT snapshot (erase their counters across categories). */
+export function removeParticipantData(boardId: string, participantId: string): EndingState | null {
+  const store = useScoreboardsStore()
+  const me = useUserStore().getPubKey()
+  if (!me) throw new Error('No pubkey available')
+  const board = store.items.find((s) => s.id === boardId)
+  if (!board) return null
+  const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
+  const next = crdt.removeParticipant(participantId)
+  void store.updateSnapshot(boardId, next)
   void publishSnapshot(boardId, next)
   return next
 }
@@ -130,4 +144,4 @@ export function editCat(boardId: string, id: string, name: string): EndingState 
   return merged
 }
 
-export default { subscribeToBoard, addScore, addCategory, editCat }
+export default { subscribeToBoard, addScore, addCategory, editCat, removeParticipantData }

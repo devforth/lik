@@ -9,6 +9,7 @@ const STORES: Record<string, { keyPath: string }> = {
   scoreboards: { keyPath: 'id' },
   profiles: { keyPath: 'pubkey' },
   rejectedScoreboardRequests: { keyPath: 'id' },
+  // participants are embedded inside scoreboards
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null

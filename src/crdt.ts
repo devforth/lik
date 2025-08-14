@@ -1,6 +1,6 @@
 /*
- * ScoreboardCRDT — PN-counter CRDT per-category, per-user with LWW for name/vis
- * - addScore(categoryKey, userPubKey, delta)
+ * ScoreboardCRDT — PN-counter CRDT per-category, per-participant with LWW for name/vis
+ * - addScore(categoryKey, participantId, delta)
  * - renameCategory(categoryKey, newName)
  * - setVisibility(categoryKey, vis)
  * - getState(): EndingState
@@ -9,17 +9,17 @@
  * Category structure:
  * { id: shortId(), name: string, state: { P: { pk: n }, N: { pk: n } }, vis: 1|0, order: number, nameTs: number, visTs: number, orderTs: number }
  * Merge rule:
- * - For P/N maps: pointwise max per pubkey
+ * - For P/N maps: pointwise max per participant id
  * - For name/vis/order: last-writer-wins by timestamp (createdAtUTC); ties resolved by lex id
  */
 
 import { nowUtc } from '@/time-sync'
 import shortId from '@/lib/utils'
 
-export type PubKey = string
+export type ParticipantId = string
 export type ScoreDelta = -1 | 1
 
-export type PNMap = Record<PubKey, number>
+export type PNMap = Record<ParticipantId, number>
 
 export interface CategoryPN {
   id: string
@@ -68,13 +68,23 @@ export class ScoreboardCRDT {
     return c
   }
 
-  /** Add +1/-1 for user pubkey in category using PN-counter semantics. */
-  addScore(categoryKey: string, userPubKey: PubKey, delta: ScoreDelta): EndingState {
+  /** Add +1/-1 for participant in category using PN-counter semantics. */
+  addScore(categoryKey: string, participantId: ParticipantId, delta: ScoreDelta): EndingState {
     if (delta !== 1 && delta !== -1) throw new Error('delta must be ±1')
     const c = this.ensureCategory(categoryKey)
     const map = delta === 1 ? c.state.P : c.state.N
-    const cur = Number(map[userPubKey] || 0)
-    map[userPubKey] = cur + 1
+    const cur = Number(map[participantId] || 0)
+    map[participantId] = cur + 1
+    return this.getState()
+  }
+
+  /** Remove all counters for a participant across all categories (irreversible). */
+  removeParticipant(participantId: ParticipantId): EndingState {
+    for (const c of Object.values(this.state.categories)) {
+      if (!c || !c.state) continue
+      if (participantId in c.state.P) delete c.state.P[participantId]
+      if (participantId in c.state.N) delete c.state.N[participantId]
+    }
     return this.getState()
   }
 

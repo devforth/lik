@@ -8,6 +8,7 @@ import { toast } from 'vue-sonner'
 import { useProfilesStore } from '@/stores/profiles'
 import { dbGetAll, dbBulkPut, dbDelete, dbPut } from '@/lib/idb'
 import { subscribeToBoard as subscribeCRDT } from '@/nostrToCRDT'
+import shortId from '@/lib/utils'
 
 export interface Scoreboard {
   id: string
@@ -18,6 +19,8 @@ export interface Scoreboard {
   members?: string[]
   // CRDT snapshot (EndingState) for the board
   snapshot?: any
+  // Local participants used in scoring: [{ id, name }]
+  participants?: { id: string; name: string }[]
 }
 
 export const useScoreboardsStore = defineStore('scoreboards', () => {
@@ -51,7 +54,15 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       const values: any[] = await dbGetAll<any>(STORE)
       // ensure createdAt is a number and sort asc
       return values
-  .map((v) => ({ id: String(v.id), name: String(v.name), createdAt: Number(v.createdAt), authorPubKey: String(v.authorPubKey || ''), members: Array.isArray(v.members) ? v.members.map(String) : [], snapshot: v.snapshot ?? undefined }))
+        .map((v) => ({
+          id: String(v.id),
+          name: String(v.name),
+          createdAt: Number(v.createdAt),
+          authorPubKey: String(v.authorPubKey || ''),
+          members: Array.isArray(v.members) ? v.members.map(String) : [],
+          snapshot: v.snapshot ?? undefined,
+          participants: Array.isArray(v.participants) ? v.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') })) : [],
+        }))
         .sort((a, b) => a.createdAt - b.createdAt)
     } catch (e) {
       console.warn('[scoreboards] loadAll failed', e)
@@ -63,7 +74,15 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     try {
       await dbBulkPut(
         STORE,
-  list.map((sb) => ({ id: sb.id, name: sb.name, createdAt: sb.createdAt, authorPubKey: sb.authorPubKey, members: Array.isArray(sb.members) ? sb.members : [], snapshot: sb.snapshot }))
+        list.map((sb) => ({
+          id: sb.id,
+          name: sb.name,
+          createdAt: sb.createdAt,
+          authorPubKey: sb.authorPubKey,
+          members: Array.isArray(sb.members) ? sb.members : [],
+          snapshot: sb.snapshot,
+          participants: Array.isArray(sb.participants) ? sb.participants : [],
+        }))
       )
     } catch (e) {
       console.warn('[scoreboards] saveAll failed', e)
@@ -124,6 +143,10 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       authorPubKey,
       // include owner as a member immediately for simpler rendering/logic
       members: authorPubKey ? [authorPubKey] : [],
+      participants: [
+        { id: shortId(), name: 'Bob' },
+        { id: shortId(), name: 'Alice' },
+      ],
     }
     items.value.push(sb)
     // persist eagerly for immediate durability
@@ -150,6 +173,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       console.warn('[scoreboards] delete failed', e)
     }
 
+  // participants are embedded; nothing else to cleanup
+
     return true
   }
 
@@ -170,6 +195,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         authorPubKey: items.value[idx].authorPubKey,
         members: Array.isArray(items.value[idx].members) ? items.value[idx].members : [],
         snapshot: items.value[idx].snapshot,
+        participants: Array.isArray(items.value[idx].participants) ? items.value[idx].participants : [],
       })
     } catch (e) {
       console.warn('[scoreboards] updateSnapshot failed', e)
@@ -177,7 +203,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   }
 
   // ---------- Board PRE (lik::brd::<id>) helpers ----------
-  type BoardPRE = { id: string; name: string; owner: string; members: string[] }
+  type BoardPRE = { id: string; name: string; owner: string; members: string[]; participants?: { id: string; name: string }[] }
   function buildBoardPREPayload(boardId: string): BoardPRE | null {
     const sb = items.value.find((s) => s.id === boardId)
     if (!sb) return null
@@ -186,6 +212,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       name: sb.name,
       owner: sb.authorPubKey,
       members: Array.isArray(sb.members) ? sb.members.slice() : [],
+      participants: (sb.participants || []).map((p) => ({ id: p.id, name: p.name })),
     }
   }
 
@@ -407,6 +434,17 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
           const newMembers = nextMembers.slice().sort().join(',')
           if (curMembers !== newMembers) { sb.members = nextMembers; changed = true }
           if (changed) void saveAll(items.value)
+          // Sync participants if present
+          try {
+            if (Array.isArray(meta?.participants)) {
+              const list = meta.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') }))
+              const sb2 = items.value.find((s) => s.id === boardId)
+              if (sb2) {
+                sb2.participants = list
+                void saveAll(items.value)
+              }
+            }
+          } catch {}
         } catch {}
       },
       oneose: () => {
@@ -538,6 +576,9 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
               createdAt: nowUtc(),
               authorPubKey: String(meta.owner),
               members: meta.members.map(String),
+              participants: Array.isArray(meta.participants)
+                ? meta.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') }))
+                : [],
             }
             items.value.push(sb)
             // tighten subscription to owner if known
