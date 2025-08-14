@@ -79,7 +79,7 @@
             <template v-for="cat in categoriesList" :key="cat.key">
               <!-- Category name row -->
               <tr>
-                <td :colspan="Math.max(1, members.length)" class="pt-4 pb-2">
+                <td :colspan="Math.min(2, participants.length)" class="pt-4 pb-2">
                   <div class="flex items-center justify-between gap-2">
                     <div class="text-sm font-semibold">{{ cat.value.name || 'Untitled category' }}</div>
                     <DropdownMenu>

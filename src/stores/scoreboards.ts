@@ -154,6 +154,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     void saveAll(items.value)
     // subscribe to join requests for this scoreboard
     subscribeJoinTagFor(id)
+    
   // Owner publishes board metadata PRE to ensure availability
   void ensureBoardPREPublished(id).catch(() => {})
     return sb
@@ -173,7 +174,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       console.warn('[scoreboards] delete failed', e)
     }
 
-  // participants are embedded; nothing else to cleanup
+    // participants are embedded; nothing else to cleanup
 
     return true
   }
