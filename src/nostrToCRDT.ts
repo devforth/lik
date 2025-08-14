@@ -107,10 +107,13 @@ export function addCategory(boardId: string, id: string, name: string): EndingSt
   // Build a minimal delta state by performing rename (which ensures the category)
   const deltaCrdt = new ScoreboardCRDT(me)
   const afterRename = deltaCrdt.renameCategory(id, name)
+  // Also ensure a priority shadow category for this category, unnamed and hidden in UI by key suffix
+  const prioKey = `${id}::prio`
+  const afterPrio = new ScoreboardCRDT(me, afterRename).renameCategory(prioKey, '')
 
   // Merge delta into current snapshot
   const baseCrdt = new ScoreboardCRDT(me, board.snapshot || undefined)
-  const merged = baseCrdt.merge(afterRename)
+  const merged = baseCrdt.merge(afterPrio)
 
   // Persist via store method
   void store.updateSnapshot(boardId, merged)
@@ -144,4 +147,99 @@ export function editCat(boardId: string, id: string, name: string): EndingState 
   return merged
 }
 
-export default { subscribeToBoard, addScore, addCategory, editCat, removeParticipantData }
+/**
+ * Set priority for a participant within a category using the category's shadow key `${categoryKey}::prio`.
+ * Implements single-selection priority by adding +1 for the chosen participant and -1 for all others.
+ * Uses PN-counter mechanics without modifying the CRDT structure.
+ */
+export function setPriority(boardId: string, categoryKey: string, participantId: string): EndingState | null {
+  const store = useScoreboardsStore()
+  const me = useUserStore().getPubKey()
+  if (!me) throw new Error('No pubkey available')
+  const board = store.items.find((s) => s.id === boardId)
+  if (!board) return null
+  const prioKey = `${categoryKey}::prio`
+
+  // Build a delta with priority increments/decrements
+  const delta = new ScoreboardCRDT(me)
+  const parts = Array.isArray(board.participants) ? board.participants : []
+  const cur = (board.snapshot as any)?.categories?.[prioKey]
+  const getScore = (pid: string) => {
+    const P = Number((cur?.state?.P || {})[pid] || 0)
+    const N = Number((cur?.state?.N || {})[pid] || 0)
+    return P - N
+  }
+
+  for (const p of parts) {
+    const pid = p?.id
+    if (!pid) continue
+    try {
+      const Pcur = Number((cur?.state?.P || {})[pid] || 0)
+      const Ncur = Number((cur?.state?.N || {})[pid] || 0)
+      const s = Pcur - Ncur
+      if (pid === participantId) {
+        // Target exactly +1 using only increases. If s < 1 => raise P; if s > 1 => raise N
+        if (s < 1) {
+          const incP = 1 - s // amount to add to P
+          const targetP = Pcur + incP
+          for (let i = 0; i < targetP; i++) delta.addScore(prioKey, pid, 1)
+        } else if (s > 1) {
+          const incN = s - 1 // amount to add to N
+          const targetN = Ncur + incN
+          for (let i = 0; i < targetN; i++) delta.addScore(prioKey, pid, -1)
+        }
+      } else {
+        // Target 0 for others: raise the smaller side to match the larger side
+        if (s > 0) {
+          const incN = s
+          const targetN = Ncur + incN
+          for (let i = 0; i < targetN; i++) delta.addScore(prioKey, pid, -1)
+        } else if (s < 0) {
+          const incP = -s
+          const targetP = Pcur + incP
+          for (let i = 0; i < targetP; i++) delta.addScore(prioKey, pid, 1)
+        }
+      }
+    } catch { /* ignore per-participant errors */ }
+  }
+
+  const base = new ScoreboardCRDT(me, board.snapshot || undefined)
+  const merged = base.merge(delta.getState())
+  void store.updateSnapshot(boardId, merged)
+  void publishSnapshot(boardId, merged)
+  return merged
+}
+
+/**
+ * Clear priority for a participant within a category: normalize their `${categoryKey}::prio` counter to 0.
+ */
+export function clearPriority(boardId: string, categoryKey: string, participantId: string): EndingState | null {
+  const store = useScoreboardsStore()
+  const me = useUserStore().getPubKey()
+  if (!me) throw new Error('No pubkey available')
+  const board = store.items.find((s) => s.id === boardId)
+  if (!board) return null
+  const prioKey = `${categoryKey}::prio`
+
+  const cur = (board.snapshot as any)?.categories?.[prioKey]
+  const P = Number((cur?.state?.P || {})[participantId] || 0)
+  const N = Number((cur?.state?.N || {})[participantId] || 0)
+  const s = P - N
+
+  const delta = new ScoreboardCRDT(me)
+  if (s > 0) {
+    const targetN = N + s
+    for (let i = 0; i < targetN; i++) delta.addScore(prioKey, participantId, -1)
+  } else if (s < 0) {
+    const targetP = P + (-s)
+    for (let i = 0; i < targetP; i++) delta.addScore(prioKey, participantId, 1)
+  }
+
+  const base = new ScoreboardCRDT(me, board.snapshot || undefined)
+  const merged = base.merge(delta.getState())
+  void store.updateSnapshot(boardId, merged)
+  void publishSnapshot(boardId, merged)
+  return merged
+}
+
+export default { subscribeToBoard, addScore, addCategory, editCat, removeParticipantData, setPriority, clearPriority }

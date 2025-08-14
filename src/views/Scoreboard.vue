@@ -79,7 +79,7 @@
             <template v-for="cat in categoriesList" :key="cat.key">
               <!-- Category name row -->
               <tr>
-                <td :colspan="Math.min(2, participants.length)" class="pt-4 pb-2">
+                <td :colspan="Math.min(2, participants.length)" class="pt-2 pb-1">
                   <div class="flex items-center justify-between gap-2">
                     <div class="text-sm font-semibold">{{ cat.value.name || 'Untitled category' }}</div>
                     <DropdownMenu>
@@ -101,14 +101,29 @@
               <!-- Counters row -->
               <tr>
                 <td v-for="p in participants" :key="p.id + ':' + cat.key" class="pb-4" :style="{ minWidth: '40vw', width: '40vw' }">
-                  <div class="flex items-center justify-center gap-3">
-                    <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, p.id, -1)" aria-label="Decrement">
-                      <ChevronDown class="h-4 w-4" />
-                    </Button>
-                    <div class="min-w-[3ch] text-center tabular-nums">{{ scoreFor(cat.value, p.id) }}</div>
-                    <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, p.id, 1)" aria-label="Increment">
-                      <ChevronUp class="h-4 w-4" />
-                    </Button>
+                  <div class="flex flex-col items-center justify-center gap-2">
+                    <div class="flex items-center justify-center gap-3">
+                      <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, p.id, -1)" aria-label="Decrement">
+                        <ChevronDown class="h-4 w-4" />
+                      </Button>
+                      <div class="min-w-[3ch] text-center tabular-nums">{{ scoreFor(cat.value, p.id) }}</div>
+                      <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, p.id, 1)" aria-label="Increment">
+                        <ChevronUp class="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <!-- Priority toggle: star button below the score with debug number -->
+                    <div class="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        class="h-5 w-5"
+                        :class="{ 'bg-primary text-primary-foreground border-primary': hasPriority(cat.key, p.id) }"
+                        @click="togglePriority(cat.key, p.id)"
+                        aria-label="Toggle priority"
+                      >
+                        <Star class="h-2 w-2" :fill="hasPriority(cat.key, p.id) ? 'currentColor' : 'none'" />
+                      </Button>
+                    </div>
                   </div>
                 </td>
               </tr>
@@ -380,7 +395,7 @@ import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { useUserStore } from '@/stores/user'
-import { MoreVertical, Trash2, QrCode, Copy, Check, Settings, Plus, ChevronUp, ChevronDown } from 'lucide-vue-next'
+import { MoreVertical, Trash2, QrCode, Copy, Check, Settings, Plus, ChevronUp, ChevronDown, Star } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -402,7 +417,7 @@ import QrcodeVue from 'qrcode.vue'
 import { useProfilesStore } from '@/stores/profiles'
 import { removeParticipantData as removeParticipantDataCRDT } from '@/nostrToCRDT'
 import shortId from '@/lib/utils'
-import { addCategory as addCategoryCRDT, addScore as addScoreCRDT, subscribeToBoard as subscribeCRDT, editCat as editCatCRDT } from '@/nostrToCRDT'
+import { addCategory as addCategoryCRDT, addScore as addScoreCRDT, subscribeToBoard as subscribeCRDT, editCat as editCatCRDT, setPriority as setPriorityCRDT, clearPriority as clearPriorityCRDT } from '@/nostrToCRDT'
 const route = useRoute()
 const router = useRouter()
 const id = computed(() => String(route.params.id || ''))
@@ -553,12 +568,12 @@ const members = computed(() => {
     .map((pk) => profiles.get(pk) || { pubkey: pk, name: '', picture: '', updatedAt: 0 })
 })
 
-// Categories from snapshot, sorted by order then name, visible only
+// Categories from snapshot, sorted by order then name, visible only, excluding ::prio shadow categories
 const categoriesList = computed(() => {
   const cats = (scoreboard.value?.snapshot?.categories || {}) as Record<string, any>
   return Object.entries(cats)
     .map(([key, value]) => ({ key, value }))
-    .filter((c) => (c.value?.vis ?? 1) === 1)
+  .filter((c) => (c.value?.vis ?? 1) === 1 && !String(c.key).endsWith('::prio'))
     .sort((a, b) => {
       const ao = Number(a.value?.order ?? 0)
       const bo = Number(b.value?.order ?? 0)
@@ -578,6 +593,31 @@ function scoreFor(cat: any, participantId: string): number {
 function changeScore(categoryKey: string, participantId: string, delta: -1 | 1) {
   if (!id.value) return
   try { addScoreCRDT(id.value, categoryKey, participantId, delta) } catch {}
+}
+
+// Priority helpers
+function prioKeyFor(categoryKey: string) { return `${categoryKey}::prio` }
+function hasPriority(categoryKey: string, participantId: string): boolean {
+  const prioCat = scoreboard.value?.snapshot?.categories?.[prioKeyFor(categoryKey)]
+  if (!prioCat) return false
+  const p = Number((prioCat?.state?.P || {})[participantId] || 0)
+  const n = Number((prioCat?.state?.N || {})[participantId] || 0)
+  return p - n > 0
+}
+function prioScoreFor(categoryKey: string, participantId: string): number {
+  const prioCat = scoreboard.value?.snapshot?.categories?.[prioKeyFor(categoryKey)]
+  if (!prioCat) return 0
+  const p = Number((prioCat?.state?.P || {})[participantId] || 0)
+  const n = Number((prioCat?.state?.N || {})[participantId] || 0)
+  return p - n
+}
+function togglePriority(categoryKey: string, participantId: string) {
+  if (!id.value) return
+  // Toggle: if already has prio -> clear; else set prio (single selection semantics are handled in setPriority)
+  try {
+    if (hasPriority(categoryKey, participantId)) clearPriorityCRDT(id.value, categoryKey, participantId)
+    else setPriorityCRDT(id.value, categoryKey, participantId)
+  } catch {}
 }
 
 function short(pk: string) { return (pk || '').slice(0, 8) }
