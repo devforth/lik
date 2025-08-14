@@ -101,8 +101,11 @@ function handleCode(code: string) {
   void (async () => {
     const res = await scoreboards.join(code)
     if (res.ok) {
-      // Go back after slight delay to show toast
-      setTimeout(() => router.back(), 300)
+      // Navigate directly to the joined board
+      const id = res.boardId;
+      if (id) {
+        setTimeout(() => router.push({ name: 'scoreboard', params: { id } }), 200)
+      }
     }
     // errors are already toasted in the store
   })()

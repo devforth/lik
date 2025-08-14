@@ -478,7 +478,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
    * - If it's already in the list but not authored by the user: show info toast.
    * - Otherwise, send a Nostr join request tagged with lik-sb-join-req-<id>.
    */
-  async function join(code: string): Promise<{ ok: boolean; reason?: 'own' | 'already' | 'bad-code' | 'no-keys' | 'bad-meta' }> {
+  async function join(code: string): Promise<{ ok: boolean; boardId?: string; reason?: 'own' | 'already' | 'bad-code' | 'no-keys' | 'bad-meta' }> {
     const raw = String(code || '').trim()
     // Extract scoreboard id from code
     const m = /^lik-([0-9a-fA-F-]{8,})$/.exec(raw)
@@ -564,7 +564,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       }
 
       toast.success('Join request sent', { description: `Waiting for approval…` })
-      return { ok: true }
+      return { ok: true, boardId: id }
     } catch (e) {
       console.warn('[scoreboards] join send failed', e)
       toast.error('Failed to send request', { description: 'Please try again.' })
@@ -574,10 +574,10 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
 
   return {
     items,
-  lastRequests,
+    lastRequests,
     addScoreboard,
     deleteScoreboard,
-  updateSnapshot,
+    updateSnapshot,
     verifyBoardPREEverywhere,
     ensureBoardPREPublished,
     // allow consumers to await initial load completion
@@ -588,13 +588,13 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     subscribeBoardCRDT,
     unsubscribeBoardCRDT,
     stopAllCRDTSubscriptions,
-  subscribeBoardMeta,
-  unsubscribeBoardMeta,
-  stopAllBoardMetaSubscriptions,
+    subscribeBoardMeta,
+    unsubscribeBoardMeta,
+    stopAllBoardMetaSubscriptions,
     join,
-  isOwner,
-  approve,
-  reject,
-  renameBoard,
+    isOwner,
+    approve,
+    reject,
+    renameBoard,
   }
 })
