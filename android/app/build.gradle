@@ -18,6 +18,8 @@ android {
     }
     buildTypes {
         release {
+            // Ensure the release build is not debuggable for Play Store
+            debuggable false
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

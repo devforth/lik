@@ -32,4 +32,5 @@ RUN yes | sdkmanager "platforms;android-35" "platform-tools" "build-tools;35.0.0
 # Build
 WORKDIR /workspace/android
 RUN chmod +x gradlew
-RUN ./gradlew --no-daemon bundleDebug
+# Build release bundle (non-debuggable by default)
+RUN ./gradlew --no-daemon bundleRelease
