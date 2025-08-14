@@ -10,7 +10,6 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
-
 # Sync Android project (non-interactively via CI=1)
 RUN CI=1 npx cap sync android
 

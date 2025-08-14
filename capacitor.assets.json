@@ -1,0 +1,12 @@
+{
+  "icon": {
+      "sources": ["assets/icon.png"]
+  },
+  "platforms": {
+    "android": {
+      "icon": {
+          "backgroundColor": "#ffffff"
+      }
+    }
+  }
+}
