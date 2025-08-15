@@ -57,7 +57,9 @@ export const useProfilesStore = defineStore('profiles', () => {
   function setTrackedPubkeys(pubkeys: string[]) {
     const unique = Array.from(new Set(pubkeys.filter(Boolean)))
     // Only resubscribe if changed
-    if (unique.length === tracked.value.length && unique.every((v, i) => v === tracked.value[i])) return
+    if (unique.length === tracked.value.length && unique.every((v, i) => v === tracked.value[i])) {
+      return
+    }
     tracked.value = unique
     if (unsub) { try { unsub() } catch {} ; unsub = null }
     if (!unique.length) return

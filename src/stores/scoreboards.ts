@@ -1,7 +1,7 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { nowUtc } from '@/time-sync'
-import { subscribeTag, send as nostrSend, fetchLatestProfile, publishPREToRelays, fetchLatestPREByDTag, RELAYS } from '@/nostr'
+import { nostrSubscribeTag, send as nostrSend, fetchLatestProfile, publishPREToRelays, fetchLatestPREByDTag, RELAYS } from '@/nostr'
 import { SimplePool } from 'nostr-tools/pool'
 import { useUserStore } from '@/stores/user'
 import { toast } from 'vue-sonner'
@@ -16,7 +16,7 @@ export interface Scoreboard {
   createdAt: number
   authorPubKey: string
   // members list of approved pubkeys
-  members?: string[]
+  members: string[]
   // CRDT snapshot (EndingState) for the board
   snapshot?: any
   // Local participants used in scoring: [{ id, name }]
@@ -39,8 +39,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   const rejected = ref<Map<string, number>>(new Map())
   // internal: indicates hydration in progress to avoid write loops
   let hydrating = false
-  // expose a readiness promise to let router/pages wait for initial load
-  let initPromise: Promise<void> | null = null
+  // expose a readiness promise to let router/pages wait for initial load (lazy init)
+  let __initPromise: Promise<void> | undefined
   // track serialized signature of board fields to detect changes
   const boardSig = new Map<string, string>()
 
@@ -131,7 +131,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     return true
   }
 
-  function addScoreboard(name: string): Scoreboard {
+  function createScoreboard(name: string): Scoreboard {
     const id = crypto.randomUUID()
     const user = useUserStore()
     const authorPubKey = user.getPubKey() || ''
@@ -155,8 +155,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     // subscribe to join requests for this scoreboard
     subscribeJoinTagFor(id)
     
-  // Owner publishes board metadata PRE to ensure availability
-  void ensureBoardPREPublished(id).catch(() => {})
+    // Owner publishes board metadata PRE to ensure availability
+    void ensureBoardPREPublished(id).catch(() => {})
     return sb
   }
 
@@ -239,36 +239,45 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     const sb = items.value.find((s) => s.id === boardId)
     const me = useUserStore().getPubKey()
     if (!sb || !me) return
-    const tag = `lik::brd::${boardId}`
     // Non-owner can't publish; just no-op
     if (sb.authorPubKey !== me) return
     await ensureBoardPREPublished(boardId)
   }
 
-  // hydrate from IndexedDB on first use
-  initPromise = (async () => {
-    hydrating = true
-    try {
-      const rows = await loadAll()
-      if (rows && rows.length) {
-        items.value = rows
-  // subscribe for all existing
-        for (const sb of items.value) subscribeJoinTagFor(sb.id)
-      }
-      // load rejected blacklist
+  // hydrate from IndexedDB on first use (lazy, idempotent)
+  async function loadOnce() {
+    if (__initPromise) return __initPromise
+    __initPromise = (async () => {
+      hydrating = true
       try {
-        await purgeExpiredRejected()
-        const rowsR = await loadRejected()
-        rejected.value.clear()
-        const now = Date.now()
-        for (const r of rowsR) if (r.expiresAt > now) rejected.value.set(r.id, r.expiresAt)
-      } catch (e) {
-        console.warn('[scoreboards] rejected load failed', e)
+        const rows = await loadAll()
+        if (rows && rows.length) {
+          items.value = rows
+          // subscribe for existing boards only if I'm the owner
+          const myPub = useUserStore().getPubKey() || ''
+          for (const sb of items.value) {
+            if (myPub && sb.authorPubKey === myPub) {
+              subscribeJoinTagFor(sb.id)
+            }
+          }
+        }
+        // load rejected blacklist
+        try {
+          await purgeExpiredRejected()
+          const rowsR = await loadRejected()
+          rejected.value.clear()
+          for (const r of rowsR) {
+            rejected.value.set(r.id, r.expiresAt)
+          }
+        } catch (e) {
+          console.warn('[scoreboards] rejected load failed', e)
+        }
+      } finally {
+        hydrating = false
       }
-    } finally {
-      hydrating = false
-    }
-  })()
+    })()
+    return __initPromise
+  }
 
   // persist on any change (debounced)
   let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -317,8 +326,11 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         const prof = useProfilesStore()
         const allMembers = new Set<string>()
         for (const sb of list) {
-          if (Array.isArray(sb.members)) for (const m of sb.members) if (m) allMembers.add(String(m))
-          if (sb.authorPubKey) allMembers.add(String(sb.authorPubKey))
+          for (const m of sb.members) {
+            if (m) {
+              allMembers.add(String(m))
+            }
+          }
         }
         prof.setTrackedPubkeys(Array.from(allMembers))
       } catch {}
@@ -337,13 +349,13 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   }
 
   function subscribeJoinTagFor(id: string) {
-    const tag = `lik-sb-join-req-${id}`
+    const tag = `lik::sb-join-req-${id}`
     // close existing if any
     if (unsubById.has(id)) {
       try { unsubById.get(id)!() } catch {}
       unsubById.delete(id)
     }
-    const unsub = subscribeTag(tag, async (evt: any) => {
+    const unsub = nostrSubscribeTag(tag, async (evt: any) => {
       // Expect a kind 1 note with content like "join-request <id>"
       try {
         const evtId = String(evt?.id || '')
@@ -416,7 +428,9 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     }
     const dTag = `lik::brd::${boardId}`
     const filter: any = { kinds: [KIND_PRE], '#d': [dTag] }
-    if (ownerPubkey) filter.authors = [String(ownerPubkey)]
+    if (ownerPubkey) {
+      filter.authors = [String(ownerPubkey)]
+    }
     const sub = brdPool.subscribeMany(RELAYS, [filter], {
       onevent: (evt: any) => {
         try {
@@ -515,7 +529,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
    * Join a scoreboard by a code like "lik-<id>".
    * - If the scoreboard is already in user's list and they are the author: show error toast.
    * - If it's already in the list but not authored by the user: show info toast.
-   * - Otherwise, send a Nostr join request tagged with lik-sb-join-req-<id>.
+   * - Otherwise, send a Nostr join request tagged with lik::sb-join-req-<id>.
    */
   async function join(code: string): Promise<{ ok: boolean; boardId?: string; reason?: 'own' | 'already' | 'bad-code' | 'no-keys' | 'bad-meta' }> {
     const raw = String(code || '').trim()
@@ -550,7 +564,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     }
 
     // Send join request on Nostr
-    const tag = `lik-sb-join-req-${id}`
+    const tag = `lik::sb-join-req-${id}`
     try {
       await nostrSend(pub, priv, 1, `join-request ${id}`, [[ 't', tag ]])
       
@@ -617,13 +631,12 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   return {
     items,
     lastRequests,
-    addScoreboard,
+    createScoreboard,
     deleteScoreboard,
     updateSnapshot,
     verifyBoardPREEverywhere,
     ensureBoardPREPublished,
-    // allow consumers to await initial load completion
-    ensureLoaded: async () => { if (initPromise) await initPromise },
+    ensureLoaded: () => loadOnce(),
     // nostr helpers
     startJoinSubscriptions,
     stopJoinSubscriptions,

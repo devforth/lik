@@ -23,11 +23,10 @@ const userStore = useUserStore()
 void userStore.ensureUser()
 
 // Subscribe to scoreboard join requests on app start and on creation of new scoreboards
-const sStore = useScoreboardsStore()
+const sbStore = useScoreboardsStore()
 // Ensure scoreboards are loaded, then let the store manage Nostr subscriptions
 void (async () => {
-	await sStore.ensureLoaded()
-	sStore.startJoinSubscriptions()
+	await sbStore.ensureLoaded()
 })()
 
 app.mount('#app')

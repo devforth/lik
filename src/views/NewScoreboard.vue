@@ -30,7 +30,7 @@ const router = useRouter()
 function onCreate() {
   const trimmed = name.value.trim()
   if (!trimmed) return
-  const created = scoreboards.addScoreboard(trimmed)
+  const created = scoreboards.createScoreboard(trimmed)
   console.log('Create Scoreboard:', created)
   name.value = ''
   // Navigate to the newly created scoreboard

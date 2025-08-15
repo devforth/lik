@@ -1,6 +1,6 @@
 // Lightweight Nostr client glue for the app
 // - connects to a few popular public relays
-// - exposes subscribeTag(tag, onEvent?) => unsubscribe
+// - exposes nostrSubscribeTag(tag, onEvent?) => unsubscribe
 // - exposes send(pubkey, privkey, kind, content, tags?) => Promise<void>
 
 import { SimplePool } from 'nostr-tools/pool'
@@ -33,7 +33,7 @@ const activeSubs = new Map<string, { close: () => void }>()
  * @param onEvent - callback for events
  * @returns unsubscribe function
  */
-export function subscribeTag(tag: string, onEvent?: (event: NostrEvent, relay?: string) => void) {
+export function nostrSubscribeTag(tag: string, onEvent?: (event: NostrEvent, relay?: string) => void) {
   const key = `t:${tag}`
   // Close previous sub if any
   if (activeSubs.has(key)) {
@@ -90,7 +90,7 @@ export function subscribeProfiles(
     RELAYS,
     [
       {
-    kinds: [0],
+        kinds: [0],
         authors: authors.map(String),
       },
     ],
@@ -440,7 +440,7 @@ export { canonicalJSONStringify, sha256Hex, computeMetadataHash } from '@/lib/ut
 
 export default {
   RELAYS,
-  subscribeTag,
+  nostrSubscribeTag,
   subscribeProfiles,
   send,
   sendPRE,
