@@ -25,20 +25,20 @@
         </DrawerTrigger>
         <DrawerContent>
           <div class="mx-auto w-full max-w-lg p-4 space-y-4">
-            <DrawerHeader>
-              <DrawerTitle>Backup your private key</DrawerTitle>
+            <DrawerHeader class="p-0">
+              <DrawerTitle>Back up your secret key</DrawerTitle>
               <DrawerDescription>
-                This is your Nostr secret key in nsec1 format. Keep it safe. Anyone with this key can control your account.
+                This key unlocks your account and the scoreboards you created. Save it somewhere safe. If you clear the app cache or lose your phone, you'll need this key to restore everything. Please make a backup now to avoid losing data.
               </DrawerDescription>
             </DrawerHeader>
             <div class="space-y-2">
-              <label class="text-sm text-muted-foreground">nsec</label>
+              <label class="text-sm text-muted-foreground">Secret key</label>
               <div class="flex gap-2">
-                <input :value="nsec" readonly class="font-mono file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm" />
+                <input :value="nsec" readonly class="font-mono file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 flex-1 min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm" />
                 <Button size="sm" @click="copyNsec">Copy</Button>
               </div>
             </div>
-            <DrawerFooter>
+            <DrawerFooter class="p-0">
               <DrawerClose as-child>
                 <Button variant="outline">Close</Button>
               </DrawerClose>
@@ -122,7 +122,7 @@ const nsec = computed(() => {
   try { return nip19.nsecEncode(hexToBytes(hex)) } catch { return '' }
 })
 async function copyNsec() {
-  try { await navigator.clipboard.writeText(nsec.value || '') ; toast.success('Copied nsec') } catch {}
+  try { await navigator.clipboard.writeText(nsec.value || '') ; toast.success('Key copied') } catch {}
 }
 
 // Import flow
