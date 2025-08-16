@@ -21,6 +21,8 @@ export interface Scoreboard {
   snapshot?: any
   // Local participants used in scoring: [{ id, name }]
   participants?: { id: string; name: string }[]
+  // Secret (AES) for encrypting board data and join requests; never published
+  secret: string
 }
 
 export const useScoreboardsStore = defineStore('scoreboards', () => {
@@ -52,18 +54,19 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   async function loadAll(): Promise<Scoreboard[] | null> {
     try {
       const values: any[] = await dbGetAll<any>(STORE)
-      // ensure createdAt is a number and sort asc
-      return values
-        .map((v) => ({
-          id: String(v.id),
-          name: String(v.name),
-          createdAt: Number(v.createdAt),
-          authorPubKey: String(v.authorPubKey || ''),
-          members: Array.isArray(v.members) ? v.members.map(String) : [],
-          snapshot: v.snapshot ?? undefined,
-          participants: Array.isArray(v.participants) ? v.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') })) : [],
-        }))
-        .sort((a, b) => a.createdAt - b.createdAt)
+      // Map and drop any boards without a valid secret (we don't support legacy data)
+      const mapped = values.map((v) => ({
+        id: String(v.id),
+        name: String(v.name),
+        createdAt: Number(v.createdAt),
+        authorPubKey: String(v.authorPubKey || ''),
+        members: Array.isArray(v.members) ? v.members.map(String) : [],
+        snapshot: v.snapshot ?? undefined,
+        participants: Array.isArray(v.participants) ? v.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') })) : [],
+        secret: String(v.secret || ''),
+      }))
+      const filtered: Scoreboard[] = mapped.filter((m) => !!m.secret)
+      return filtered.sort((a, b) => a.createdAt - b.createdAt)
     } catch (e) {
       console.warn('[scoreboards] loadAll failed', e)
       return null
@@ -82,6 +85,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
           members: Array.isArray(sb.members) ? sb.members : [],
           snapshot: sb.snapshot,
           participants: Array.isArray(sb.participants) ? sb.participants : [],
+          // persist secret locally only
+          secret: sb.secret,
         }))
       )
     } catch (e) {
@@ -131,10 +136,18 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     return true
   }
 
-  function createScoreboard(name: string): Scoreboard {
+  async function createScoreboard(name: string): Promise<Scoreboard> {
     const id = crypto.randomUUID()
     const user = useUserStore()
     const authorPubKey = user.getPubKey() || ''
+    const ownerPriv = user.getPrivKey() || ''
+    // Secret generation: sha-512 of `${priv}::${boardId}`
+    // Note: priv is hex; secret is hex string
+    const rawForSecret = `${ownerPriv}::${id}`
+
+    // Derive secret before constructing the scoreboard
+    const { sha512Hex } = await import('@/lib/utils')
+    const secretHex = await sha512Hex(rawForSecret)
 
     const sb: Scoreboard = {
       id,
@@ -147,15 +160,15 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         { id: shortId(), name: 'Bob' },
         { id: shortId(), name: 'Alice' },
       ],
+      secret: secretHex,
     }
-    items.value.push(sb)
     // persist eagerly for immediate durability
-    // (watcher also persists, but this speeds up single-add cases)
-    void saveAll(items.value)
+    await saveAll([...(items.value || []), sb])
+    items.value.push(sb)
     // subscribe to join requests for this scoreboard
     subscribeJoinTagFor(id)
-    
-    // Owner publishes board metadata PRE to ensure availability
+
+    // Publish encrypted board metadata PRE
     void ensureBoardPREPublished(id).catch(() => {})
     return sb
   }
@@ -197,13 +210,14 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         members: Array.isArray(items.value[idx].members) ? items.value[idx].members : [],
         snapshot: items.value[idx].snapshot,
         participants: Array.isArray(items.value[idx].participants) ? items.value[idx].participants : [],
+  secret: items.value[idx].secret,
       })
     } catch (e) {
       console.warn('[scoreboards] updateSnapshot failed', e)
     }
   }
 
-  // ---------- Board PRE (lik::brd::<id>) helpers ----------
+  // ---------- Board PRE (lik::brd::<id>) helpers (encrypted content) ----------
   type BoardPRE = { id: string; name: string; owner: string; members: string[]; participants?: { id: string; name: string }[] }
   function buildBoardPREPayload(boardId: string): BoardPRE | null {
     const sb = items.value.find((s) => s.id === boardId)
@@ -223,12 +237,19 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     const sb = items.value.find((s) => s.id === boardId)
     if (!sb || !me) return
     if (sb.authorPubKey !== me) return // only owner publishes
+    if (!sb.secret) {
+      // Secret not ready; skip for now (creator IIFE triggers again once secret is set)
+      return
+    }
     const p = await user.ensureUser()
     const tag = `lik::brd::${boardId}`
     const payload = buildBoardPREPayload(boardId)
     if (!payload) return
     try {
-      await publishPREToRelays(p.pubkeyHex, p.privkeyHex, tag, payload, RELAYS)
+      // Encrypt metadata with board secret before publish
+      const { aesEncryptToBase64 } = await import('@/lib/utils')
+      const enc = await aesEncryptToBase64(String(sb.secret), JSON.stringify(payload))
+      await publishPREToRelays(p.pubkeyHex, p.privkeyHex, tag, enc, RELAYS)
     } catch (e) {
       console.warn('[scoreboards] ensureBoardPREPublished failed', e)
     }
@@ -349,7 +370,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   }
 
   function subscribeJoinTagFor(id: string) {
-    const tag = `lik::sb-join-req-${id}`
+    const tag = `lik::sb-join-req::${id}`
     // close existing if any
     if (unsubById.has(id)) {
       try { unsubById.get(id)!() } catch {}
@@ -363,6 +384,20 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         const createdAt = Number(evt?.created_at || 0)
         if (!evtId || !pubkey) return
         if (isRejected(evtId)) return
+        // Decrypt join content with local secret; if decryption fails, ignore silently
+        try {
+          const content = String(evt?.content || '')
+          const sb = items.value.find((s) => s.id === id)
+          const secret = sb?.secret
+          if (!secret) return // cannot validate without secret
+          const { aesDecryptFromBase64 } = await import('@/lib/utils')
+          const plain = await aesDecryptFromBase64(secret, content)
+          // Expected JSON: { t: 'join-request', id }
+          const obj = JSON.parse(plain)
+          if (!obj || obj.t !== 'join-request' || String(obj.id) !== id) return
+        } catch {
+          return
+        }
         // Fetch latest profile and only include if has some info
         try {
           const prof = await fetchLatestProfile(pubkey, 2500)
@@ -420,7 +455,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     }
   }
 
-  // Board metadata PRE subscription
+  // Board metadata PRE subscription (decrypt with local secret)
   function subscribeBoardMeta(boardId: string, ownerPubkey?: string) {
     if (brdUnsubById.has(boardId)) {
       try { brdUnsubById.get(boardId)!() } catch {}
@@ -434,32 +469,41 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     const sub = brdPool.subscribeMany(RELAYS, [filter], {
       onevent: (evt: any) => {
         try {
-          const content = String(evt?.content || '{}')
-          const meta = JSON.parse(content)
+          const content = String(evt?.content || '')
           const sb = items.value.find((s) => s.id === boardId)
-          if (!sb) return
-          // Update fields if changed
-          const nextName = String(meta?.name || sb.name)
-          const nextOwner = String(meta?.owner || sb.authorPubKey)
-          const nextMembers = Array.isArray(meta?.members) ? meta.members.map(String) : (sb.members || [])
-          let changed = false
-          if (sb.name !== nextName) { sb.name = nextName; changed = true }
-          if (sb.authorPubKey !== nextOwner) { sb.authorPubKey = nextOwner; changed = true }
-          const curMembers = (sb.members || []).slice().sort().join(',')
-          const newMembers = nextMembers.slice().sort().join(',')
-          if (curMembers !== newMembers) { sb.members = nextMembers; changed = true }
-          if (changed) void saveAll(items.value)
-          // Sync participants if present
-          try {
-            if (Array.isArray(meta?.participants)) {
-              const list = meta.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') }))
+          if (!sb || !sb.secret) return
+          // Decrypt metadata
+          const metaStrPromise = import('@/lib/utils').then(({ aesDecryptFromBase64 }) => aesDecryptFromBase64(String(sb.secret), content))
+          void (async () => {
+            try {
+              const metaStr = await metaStrPromise
+              const meta = JSON.parse(metaStr)
               const sb2 = items.value.find((s) => s.id === boardId)
-              if (sb2) {
-                sb2.participants = list
-                void saveAll(items.value)
-              }
-            }
-          } catch {}
+              if (!sb2) return
+              // Update fields if changed
+              const nextName = String(meta?.name || sb2.name)
+              const nextOwner = String(meta?.owner || sb2.authorPubKey)
+              const nextMembers = Array.isArray(meta?.members) ? meta.members.map(String) : (sb2.members || [])
+              let changed = false
+              if (sb2.name !== nextName) { sb2.name = nextName; changed = true }
+              if (sb2.authorPubKey !== nextOwner) { sb2.authorPubKey = nextOwner; changed = true }
+              const curMembers = (sb2.members || []).slice().sort().join(',')
+              const newMembers = nextMembers.slice().sort().join(',')
+              if (curMembers !== newMembers) { sb2.members = nextMembers; changed = true }
+              if (changed) void saveAll(items.value)
+              // Sync participants if present
+              try {
+                if (Array.isArray(meta?.participants)) {
+                  const list = meta.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') }))
+                  const sb3 = items.value.find((s) => s.id === boardId)
+                  if (sb3) {
+                    sb3.participants = list
+                    void saveAll(items.value)
+                  }
+                }
+              } catch {}
+            } catch {}
+          })()
         } catch {}
       },
       oneose: () => {
@@ -526,20 +570,21 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   }
 
   /**
-   * Join a scoreboard by a code like "lik-<id>".
+   * Join a scoreboard by a code like "lik::<id>::<secret>".
    * - If the scoreboard is already in user's list and they are the author: show error toast.
    * - If it's already in the list but not authored by the user: show info toast.
-   * - Otherwise, send a Nostr join request tagged with lik::sb-join-req-<id>.
+   * - Otherwise, send a Nostr join request tagged with lik::sb-join-req::<id>, encrypted with the secret.
    */
   async function join(code: string): Promise<{ ok: boolean; boardId?: string; reason?: 'own' | 'already' | 'bad-code' | 'no-keys' | 'bad-meta' }> {
     const raw = String(code || '').trim()
-    // Extract scoreboard id from code
-    const m = /^lik-([0-9a-fA-F-]{8,})$/.exec(raw)
+    // Extract scoreboard id and secret from code lik::<id>::<secret>
+    const m = /^lik::([0-9a-fA-F-]{8,})::([0-9a-fA-F]{64,})$/.exec(raw)
     if (!m) {
-      toast.error('Invalid code', { description: 'Use a code starting with "lik-"' })
+      toast.error('Invalid code', { description: 'Use a code like "lik::id::secret"' })
       return { ok: false, reason: 'bad-code' }
     }
     const id = m[1]
+    const secret = m[2]
 
     // Check duplicates/ownership
     const existing = items.value.find((s) => s.id === id)
@@ -563,10 +608,13 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       return { ok: false, reason: 'no-keys' }
     }
 
-    // Send join request on Nostr
-    const tag = `lik::sb-join-req-${id}`
+    // Send encrypted join request on Nostr
+    const tag = `lik::sb-join-req::${id}`
     try {
-      await nostrSend(pub, priv, 1, `join-request ${id}`, [[ 't', tag ]])
+      const payload = { t: 'join-request', id }
+      const { aesEncryptToBase64 } = await import('@/lib/utils')
+      const enc = await aesEncryptToBase64(secret, JSON.stringify(payload))
+      await nostrSend(pub, priv, 1, enc, [[ 't', tag ]])
       
       // Immediately fetch two PREs and cache locally:
       // 1) lik::brd::<id> board metadata (owner publishes)
@@ -576,7 +624,10 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         const { event: brdEvt } = await fetchLatestPREByDTag(boardTag)
         if (brdEvt && typeof brdEvt.content === 'string') {
           try {
-            const meta = JSON.parse(brdEvt.content)
+            // Decrypt board metadata with provided secret
+            const { aesDecryptFromBase64 } = await import('@/lib/utils')
+            const metaStr = await aesDecryptFromBase64(secret, String(brdEvt.content))
+            const meta = JSON.parse(metaStr)
             if (!meta) {
               console.error('Invalid board metadata')
               return { ok: false, reason: 'bad-meta' }
@@ -594,6 +645,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
               participants: Array.isArray(meta.participants)
                 ? meta.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') }))
                 : [],
+              secret,
             }
             items.value.push(sb)
             // tighten subscription to owner if known
@@ -605,9 +657,18 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         const { event: crdtEvt } = await fetchLatestPREByDTag(crdtTag)
         if (crdtEvt && typeof crdtEvt.content === 'string') {
           try {
-            const snapshot = JSON.parse(crdtEvt.content)
+            // Snapshot now may be encrypted; attempt decryption with provided secret
+            let snapshot: any = null
+            try {
+              const { aesDecryptFromBase64 } = await import('@/lib/utils')
+              const plain = await aesDecryptFromBase64(secret, crdtEvt.content)
+              snapshot = JSON.parse(plain)
+            } catch {
+              // If decryption fails, treat as empty snapshot (cannot recover)
+              snapshot = null
+            }
             const idx = items.value.findIndex((s) => s.id === id)
-            if (idx !== -1) items.value[idx].snapshot = snapshot
+            if (idx !== -1 && snapshot) items.value[idx].snapshot = snapshot
           } catch {}
         }
 

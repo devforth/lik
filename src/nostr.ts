@@ -33,7 +33,7 @@ const activeSubs = new Map<string, { close: () => void }>()
  * @param onEvent - callback for events
  * @returns unsubscribe function
  */
-export function nostrSubscribeTag(tag: string, onEvent?: (event: NostrEvent, relay?: string) => void) {
+export function nostrSubscribeTag(tag: string, onEvent: (event: NostrEvent, relay?: string) => void) {
   const key = `t:${tag}`
   // Close previous sub if any
   if (activeSubs.has(key)) {
@@ -48,8 +48,8 @@ export function nostrSubscribeTag(tag: string, onEvent?: (event: NostrEvent, rel
     ],
     {
       onevent: (evt) => {
-        if (onEvent) onEvent(evt)
-        else console.log('[nostr] event', tag, evt)
+        console.log('[nostr] event', { tag, evt })
+        onEvent(evt)
       },
       oneose: () => {
         // End-of-stored-events marker from relays; keep subscription open for future events
@@ -197,7 +197,9 @@ export async function send(
     const signed = finalizeEvent({ ...evt }, sk)
     const pubs = toPromises(pool.publish(rels, signed) as any)
    // Fire-and-forget: log failures but don't block UI
-    for (const p of pubs) p.catch((e: any) => console.warn('[nostr] publish error:', e?.message ?? e))
+    for (const p of pubs) {
+      p.catch((e: any) => console.warn('[nostr] publish error:', e?.message ?? e))
+    }
   } catch (e) {
     console.warn('[nostr] send failed', e)
   }
@@ -206,15 +208,17 @@ export async function send(
 // PRE kind constant (parameterized replaceable event)
 export const KIND_PRE = 30078
 
-/** Send a PRE (kind 30078) with a d-tag and JSON payload. */
+/** Send a PRE (kind 30078) with a d-tag and payload string.
+ * Caller must provide a string (encrypted or pre-stringified JSON).
+ */
 export async function sendPRE(
   pubkeyHex: string,
   privkeyHex: string,
   dTag: string,
-  payload: any,
+  payload: string,
   relays: string[] = RELAYS
 ) {
-  const content = JSON.stringify(payload ?? {})
+  const content = String(payload)
   return send(pubkeyHex, privkeyHex, KIND_PRE, content, [[ 'd', String(dTag) ]], relays)
 }
 
@@ -339,10 +343,7 @@ export async function getPREHashPerRelay(
               if (resolved) return
               try {
                 if (latest && typeof latest.content === 'string') {
-                  let parsed: any
-                  try { parsed = JSON.parse(latest.content) } catch { parsed = latest.content }
-                  const canon = canonicalJSONStringify(parsed)
-                  results[relay] = await sha256Hex(canon)
+                  results[relay] = await sha256Hex(String(latest.content))
                 } else {
                   results[relay] = null
                 }
@@ -377,14 +378,13 @@ export async function publishPREToRelays(
   pubkeyHex: string,
   privkeyHex: string,
   dTag: string,
-  payload: any,
+  payload: string,
   relays: string[] = RELAYS
 ) {
   const hashes = await getPREHashPerRelay(dTag, [pubkeyHex], relays, 3000)
   let need: string[] = []
   try {
-    const canon = canonicalJSONStringify(payload ?? {})
-    const localHash = await sha256Hex(canon)
+    const localHash = await sha256Hex(String(payload))
     need = relays.filter((r) => !hashes[r] || hashes[r] !== localHash)
   } catch {
     need = relays.slice()

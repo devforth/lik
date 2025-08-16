@@ -31,3 +31,14 @@ npm run dev
 ```sh
 npm run build
 ```
+
+## End-to-end encryption (E2EE)
+
+Scoreboards use a symmetric AES-GCM secret for encrypting join requests, board metadata (PRE lik::brd::<id>), and CRDT snapshots.
+
+- Secret derivation: sha512Hex(`${ownerPrivHex}::${boardId}`), stored only locally in IndexedDB with the scoreboard object. It is never published to Nostr.
+- Invite/share code format: `lik::<scoreboard_id>::<secret>` (shown in the Invite drawer and QR). Share this code with participants.
+- Join flow: the app expects the code above; join requests are encrypted with the secret and ignored by the owner if decryption fails.
+- Recovery: CRDT PRE bodies are encrypted; recovery decrypts with the provided secret.
+- Board metadata PRE (`lik::brd::<id>`) is also encrypted with the same secret; only the d-tag reveals the board id.
+

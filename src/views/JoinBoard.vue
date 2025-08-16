@@ -33,7 +33,7 @@
         <Input
           v-if="manualMode"
           v-model="manualCode"
-          placeholder="Enter share code like lik-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+          placeholder="Enter share code like lik::xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx::<secret>"
           class="flex-1 bg-white/10 text-white placeholder:text-white/60 border-white/30"
         />
         <Button v-if="manualMode" @click="submitManual">Join</Button>
@@ -89,12 +89,12 @@ function toggleManual() {
 }
 
 function isLikCode(s: string) {
-  return /^lik-[0-9a-fA-F-]{8,}$/.test(s)
+  return /^lik::[0-9a-fA-F-]{8,}::[0-9a-fA-F]{64,}$/.test(s)
 }
 
 function handleCode(code: string) {
   if (!isLikCode(code)) {
-    toast.error('Invalid code', { description: 'The QR code must start with "lik-"' })
+    toast.error('Invalid code', { description: 'Code must be lik::id::secret' })
     return
   }
   // call join action

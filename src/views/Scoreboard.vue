@@ -177,7 +177,7 @@
             </div>
 
             <div class="w-full text-left text-sm text-muted-foreground">
-              Ask the invited user to open the LIK app, tap "Join to scoreboard" in the sidebar, then scan this QR code or enter the board ID manually from the input above.
+              Ask the invited user to open the LIK app, tap "Join to scoreboard" in the sidebar, then scan this QR code or paste the code above.
             </div>
           </div>
 
@@ -438,7 +438,14 @@ const drawerOpen = ref(false)
 const inviteOpen = ref(false)
 const settingsOpen = ref(false)
 const copied = ref(false)
-const boardId = computed(() => (id.value ? `lik-${id.value}` : ''))
+// Invite/share code carries secret: lik::scoreboard_id::secret
+const boardId = computed(() => {
+  const sb = scoreboard.value
+  if (!sb?.id || !sb?.secret) {
+    return ''
+  }
+  return `lik::${sb.id}::${sb.secret}`
+})
 const LAST_KEY = 'lik:lastScoreboardId'
 const CLIPBOARD_KEY = 'lik:lastCopiedBoardId'
 
@@ -635,9 +642,14 @@ watch(
     if (!ready.value || !id.value || !scoreboard.value) return
     // Owner ensures board PRE published everywhere (name/owner/members)
     if (isOwner.value) {
-      try { await store.verifyBoardPREEverywhere(id.value) } catch {}
+      try { 
+        await store.verifyBoardPREEverywhere(id.value) 
+      } catch {}
       // if previously subscribed as non-owner, clean it up
-      if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
+      if (unsubBRD) { 
+        try { unsubBRD() } catch {}; 
+        unsubBRD = null 
+      }
     }
     // Non-owner: subscribe to board metadata updates
     if (!isOwner.value) {
@@ -649,9 +661,14 @@ watch(
       } catch {}
     }
     // Subscribe to CRDT updates from all members except self
-    if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
+    if (unsubCRDT) { 
+      try { unsubCRDT() } catch {}; 
+      unsubCRDT = null 
+    }
     const members = Array.isArray(scoreboard.value.members) ? scoreboard.value.members : []
-    try { unsubCRDT = subscribeCRDT(id.value, members) } catch {}
+    try { 
+      unsubCRDT = subscribeCRDT(id.value, members) 
+    } catch {}
   },
   { immediate: true, deep: true }
 )

@@ -225,14 +225,19 @@ async function onImport() {
       setTimeout(() => { if (resolved) return; try { sub.close() } catch {}; resolved = true; resolve() }, 2500)
     })))
 
-    // For each candidate board id, fetch brd and crdt PREs; add only if both available
+    // For each candidate board id, fetch brd and crdt PREs; decrypt using owner-derived secret and add only if both available
     for (const id of brdIds) {
       try {
         const { event: brdEvt } = await fetchLatestPREByDTag(`lik::brd::${id}`)
         const { event: crdtEvt } = await fetchLatestPREByDTag(`lik::crdt::${id}`)
         if (!brdEvt || !crdtEvt) continue
-        const meta = JSON.parse(String(brdEvt.content || '{}'))
-        const snapshot = JSON.parse(String(crdtEvt.content || '{}'))
+        // Derive board secret as sha512Hex(`${priv}::${id}`)
+        const { sha512Hex, aesDecryptFromBase64 } = await import('@/lib/utils')
+        const secret = await sha512Hex(`${skHex}::${id}`)
+        const metaStr = await aesDecryptFromBase64(secret, String(brdEvt.content || ''))
+        const crdtStr = await aesDecryptFromBase64(secret, String(crdtEvt.content || ''))
+        const meta = JSON.parse(metaStr)
+        const snapshot = JSON.parse(crdtStr)
         if (!meta?.id || meta.id !== id) continue
         // Add to local store
         const exists = sbStore.items.find((s) => s.id === id)
@@ -245,6 +250,7 @@ async function onImport() {
           members: Array.isArray(meta.members) ? meta.members.map(String) : [],
           participants: Array.isArray(meta.participants) ? meta.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') })) : [],
           snapshot,
+          secret,
         })
         recovered.add(id)
       } catch {}

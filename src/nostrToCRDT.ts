@@ -3,6 +3,7 @@
 import { SimplePool } from 'nostr-tools/pool'
 import type { Filter } from 'nostr-tools'
 import { RELAYS, sendPRE } from '@/nostr'
+import { canonicalJSONStringify } from '@/lib/utils'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { ScoreboardCRDT, type EndingState } from '@/crdt'
 import { useUserStore } from '@/stores/user'
@@ -14,7 +15,15 @@ async function publishSnapshot(boardId: string, state: EndingState) {
     const user = useUserStore()
     const p = await user.ensureUser()
     const tagD = `lik::crdt::${boardId}`
-    await sendPRE(p.pubkeyHex, p.privkeyHex, tagD, state)
+    // Encrypt state with board secret
+    const store = useScoreboardsStore()
+    const sb = store.items.find((s) => s.id === boardId)
+    const secret = sb?.secret
+    if (!secret) return // cannot publish without secret
+    const { aesEncryptToBase64 } = await import('@/lib/utils')
+    const canon = canonicalJSONStringify(state)
+    const enc = await aesEncryptToBase64(secret, canon)
+    await sendPRE(p.pubkeyHex, p.privkeyHex, tagD, enc)
   } catch (e) {
     // non-fatal
   }
@@ -40,13 +49,17 @@ export function subscribeToBoard(boardId: string, pubkeys: string[]) {
   if (authors.length) (filters[0] as any).authors = authors
 
   const sub = pool.subscribeMany(RELAYS, filters as any, {
-    onevent: (evt: any) => {
+    onevent: async (evt: any) => {
       try {
-        const content = String(evt?.content || '{}')
-        const remote: EndingState = JSON.parse(content)
+        const content = String(evt?.content || '')
         const store = useScoreboardsStore()
         const board = store.items.find((s) => s.id === boardId)
         if (!board) return
+        const secret = board.secret
+        if (!secret) return
+        const { aesDecryptFromBase64 } = await import('@/lib/utils')
+        const plain = await aesDecryptFromBase64(secret, content)
+        const remote: EndingState = JSON.parse(plain)
         const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
         const next = crdt.merge(remote)
         // persist merged snapshot via store (IndexedDB)
