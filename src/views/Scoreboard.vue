@@ -10,11 +10,12 @@
     </div>
   </div>
 
-  <div v-else class="p-4 space-y-6">
+  <!-- Loaded state -->
+  <div v-else-if="ready && scoreboard" class="p-4 space-y-6">
     <div class="flex items-start justify-between gap-2">
       <div>
         <h1 class="text-2xl font-semibold">{{ scoreboard?.name ?? 'Scoreboard' }}</h1>
-        <div v-if="!canEdit" class="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">
+        <div v-if="ready && !canEdit" class="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">
           <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
           Read-only
         </div>
@@ -263,6 +264,36 @@
     </div>
   </div>
 
+  <!-- Loading skeleton state -->
+  <div v-else class="p-4 space-y-6">
+    <div class="flex items-start justify-between gap-2">
+      <div class="space-y-2 w-full max-w-screen-sm">
+        <Skeleton class="h-7 w-40" />
+        <Skeleton class="h-4 w-24" />
+      </div>
+      <Skeleton class="h-8 w-8 rounded-md" />
+    </div>
+
+    <div class="-mx-4 px-4">
+      <div class="overflow-x-auto relative">
+        <div class="min-w-full space-y-4">
+          <!-- Header row skeleton -->
+          <div class="flex gap-4">
+            <Skeleton class="h-6 w-[40vw]" />
+            <Skeleton class="h-6 w-[40vw]" />
+          </div>
+          <!-- A few rows skeleton -->
+          <div class="space-y-3">
+            <div v-for="i in 3" :key="i" class="flex gap-4 items-center">
+              <Skeleton class="h-10 w-[40vw]" />
+              <Skeleton class="h-10 w-[40vw]" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Floating create-category action -->
   <div v-if="!notFound && canEdit" class="pointer-events-none">
     <Button
@@ -405,6 +436,7 @@ import { useScoreboardsStore } from '@/stores/scoreboards'
 import { useUserStore } from '@/stores/user'
 import { MoreVertical, Trash2, QrCode, Copy, Check, Settings, Plus, ChevronUp, ChevronDown, Star } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   DropdownMenu,
   DropdownMenuContent,
