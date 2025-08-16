@@ -2,7 +2,7 @@
 
 import { SimplePool } from 'nostr-tools/pool'
 import type { Filter } from 'nostr-tools'
-import { RELAYS, sendPRE } from '@/nostr'
+import { RELAYS, sendPRE, KIND_PRE } from '@/nostr'
 import { canonicalJSONStringify } from '@/lib/utils'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { ScoreboardCRDT, type EndingState } from '@/crdt'
@@ -10,6 +10,16 @@ import { useUserStore } from '@/stores/user'
 
 const pool = new SimplePool()
 const active = new Map<string, { close: () => void }>()
+
+function isEditor(boardId: string, me: string): boolean {
+  const store = useScoreboardsStore()
+  const sb = store.items.find((s) => s.id === boardId)
+  if (!sb) return false
+  if (String(sb.authorPubKey || '') === String(me)) return true
+  const editors = Array.isArray(sb.editors) ? sb.editors : []
+  return editors.includes(String(me))
+}
+
 async function publishSnapshot(boardId: string, state: EndingState) {
   try {
     const user = useUserStore()
@@ -20,6 +30,16 @@ async function publishSnapshot(boardId: string, state: EndingState) {
     const sb = store.items.find((s) => s.id === boardId)
     const secret = sb?.secret
     if (!secret) return // cannot publish without secret
+    // Only owner or approved members are allowed to publish snapshots
+    // this case should not be possible because UI shoudl disable buttons, but just in case, better throw to debug easier
+    const me = p.pubkeyHex
+    const editors = Array.isArray(sb?.editors) ? sb!.editors : []
+    const isOwner = String(sb?.authorPubKey || '') === String(me)
+    const isEditor = editors.includes(String(me))
+    if (!isOwner && !isEditor) {
+      throw new Error('Not authorized to publish snapshot')
+    }
+
     const { aesEncryptToBase64 } = await import('@/lib/utils')
     const canon = canonicalJSONStringify(state)
     const enc = await aesEncryptToBase64(secret, canon)
@@ -33,11 +53,17 @@ async function publishSnapshot(boardId: string, state: EndingState) {
  * Subscribe to PRE with #d "crdt::<boardId>" and authors filter of all pubkeys except own.
  * On events, parse snapshot JSON and merge into local board snapshot, persist in IDB via store.
  */
-export function subscribeToBoard(boardId: string, pubkeys: string[]) {
+export function subscribeToBoardCRDT(boardId: string, pubkeys: string[]) {
   const tagD = `lik::crdt::${boardId}`
   const me = useUserStore().getPubKey()
   if (!me) throw new Error('No pubkey available')
-  const authors = (Array.isArray(pubkeys) ? pubkeys : []).map(String).filter((p) => p && p !== me)
+  // Ensure we always constrain by authors; if excluding self empties the list,
+  // fall back to including the provided pubkeys (which may include self) or self as last resort.
+  const raw = (Array.isArray(pubkeys) ? pubkeys : []).map(String).filter(Boolean)
+  let authors = raw.filter((p) => p !== me)
+  if (!authors.length) {
+    authors = raw.length ? raw : [me]
+  }
   const key = `crdt:${boardId}`
 
   if (active.has(key)) {
@@ -45,11 +71,11 @@ export function subscribeToBoard(boardId: string, pubkeys: string[]) {
     active.delete(key)
   }
 
-  const filters: Filter[] = [{ '#d': [tagD] } as any]
-  if (authors.length) (filters[0] as any).authors = authors
+  const filters: Filter[] = [{ kinds: [KIND_PRE] as any, '#d': [tagD], authors } as any]
 
   const sub = pool.subscribeMany(RELAYS, filters as any, {
-    onevent: async (evt: any) => {
+  onevent: async (evt: any) => {
+    console.info('[nostr] PRE event CRDT', { evt })
       try {
         const content = String(evt?.content || '')
         const store = useScoreboardsStore()
@@ -82,6 +108,10 @@ export function addScore(boardId: string, categoryKey: string, participantId: st
   const store = useScoreboardsStore()
   const me = useUserStore().getPubKey()
   if (!me) throw new Error('No pubkey available')
+  if (!isEditor(boardId, me)) {
+    // again this should not even be possible but just to debug easier
+    throw new Error('Not authorized to add score - insufficient permissions')
+  }
   const board = store.items.find((s) => s.id === boardId)
   if (!board) return null
   const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
@@ -97,6 +127,9 @@ export function removeParticipantData(boardId: string, participantId: string): E
   const store = useScoreboardsStore()
   const me = useUserStore().getPubKey()
   if (!me) throw new Error('No pubkey available')
+  if (!isEditor(boardId, me)) {
+    throw new Error('Not authorized to remove participant - insufficient permissions')
+  }
   const board = store.items.find((s) => s.id === boardId)
   if (!board) return null
   const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
@@ -114,6 +147,9 @@ export function addCategory(boardId: string, id: string, name: string): EndingSt
   const store = useScoreboardsStore()
   const me = useUserStore().getPubKey()
   if (!me) throw new Error('No pubkey available')
+  if (!isEditor(boardId, me)) {
+    throw new Error('Not authorized to add category - insufficient permissions')
+  }
   const board = store.items.find((s) => s.id === boardId)
   if (!board) return null
 
@@ -144,6 +180,9 @@ export function editCat(boardId: string, id: string, name: string): EndingState 
   const store = useScoreboardsStore()
   const me = useUserStore().getPubKey()
   if (!me) throw new Error('No pubkey available')
+  if (!isEditor(boardId, me)) {
+    throw new Error('Not authorized to edit category - insufficient permissions')
+  }
   const board = store.items.find((s) => s.id === boardId)
   if (!board) return null
 
@@ -169,6 +208,9 @@ export function setPriority(boardId: string, categoryKey: string, participantId:
   const store = useScoreboardsStore()
   const me = useUserStore().getPubKey()
   if (!me) throw new Error('No pubkey available')
+  if (!isEditor(boardId, me)) {
+    throw new Error('Not authorized to set priority - insufficient permissions')
+  }
   const board = store.items.find((s) => s.id === boardId)
   if (!board) return null
   const prioKey = `${categoryKey}::prio`
@@ -230,6 +272,9 @@ export function clearPriority(boardId: string, categoryKey: string, participantI
   const store = useScoreboardsStore()
   const me = useUserStore().getPubKey()
   if (!me) throw new Error('No pubkey available')
+  if (!isEditor(boardId, me)) {
+    throw new Error('Not authorized to clear priority - insufficient permissions')
+  }
   const board = store.items.find((s) => s.id === boardId)
   if (!board) return null
   const prioKey = `${categoryKey}::prio`
@@ -255,4 +300,4 @@ export function clearPriority(boardId: string, categoryKey: string, participantI
   return merged
 }
 
-export default { subscribeToBoard, addScore, addCategory, editCat, removeParticipantData, setPriority, clearPriority }
+export default { subscribeToBoardCRDT, addScore, addCategory, editCat, removeParticipantData, setPriority, clearPriority }

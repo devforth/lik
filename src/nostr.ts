@@ -396,6 +396,7 @@ export async function publishPREToRelays(
 /** Fetch the latest PRE by d-tag across relays; returns latest event and relay. */
 export async function fetchLatestPREByDTag(
   dTag: string,
+  authors?: string[] | null,
   relays: string[] = RELAYS,
   timeoutMs = 3000
 ): Promise<{ event: any | null; relay: string | null }> {
@@ -407,12 +408,13 @@ export async function fetchLatestPREByDTag(
         let resolved = false
         const sub = pool.subscribeMany(
           [relay],
-          [ { kinds: [KIND_PRE], '#d': [String(dTag)] } as any ],
+          [ (() => { const f: any = { kinds: [KIND_PRE], '#d': [String(dTag)] }; if (authors && authors.length) f.authors = authors.map(String); return f })() ],
           {
             onevent: (evt) => {
               if (!latest || Number(evt?.created_at || 0) > Number(latest?.created_at || 0)) {
                 latest = evt
                 latestRelay = relay
+                console.info('[nostr] latest PRE event', { dTag, latest, relay })
               }
             },
             oneose: () => {

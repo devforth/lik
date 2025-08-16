@@ -7,7 +7,7 @@ import { useUserStore } from '@/stores/user'
 import { toast } from 'vue-sonner'
 import { useProfilesStore } from '@/stores/profiles'
 import { dbGetAll, dbBulkPut, dbDelete, dbPut } from '@/lib/idb'
-import { subscribeToBoard as subscribeCRDT } from '@/nostrToCRDT'
+import { subscribeToBoardCRDT } from '@/nostrToCRDT'
 import shortId from '@/lib/utils'
 
 export interface Scoreboard {
@@ -15,8 +15,8 @@ export interface Scoreboard {
   name: string
   createdAt: number
   authorPubKey: string
-  // members list of approved pubkeys
-  members: string[]
+  // editors list of approved pubkeys
+  editors: string[]
   // CRDT snapshot (EndingState) for the board
   snapshot?: any
   // Local participants used in scoring: [{ id, name }]
@@ -60,7 +60,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         name: String(v.name),
         createdAt: Number(v.createdAt),
         authorPubKey: String(v.authorPubKey || ''),
-        members: Array.isArray(v.members) ? v.members.map(String) : [],
+        editors: Array.isArray((v as any).editors) ? (v as any).editors.map(String) : [],
         snapshot: v.snapshot ?? undefined,
         participants: Array.isArray(v.participants) ? v.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') })) : [],
         secret: String(v.secret || ''),
@@ -82,7 +82,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
           name: sb.name,
           createdAt: sb.createdAt,
           authorPubKey: sb.authorPubKey,
-          members: Array.isArray(sb.members) ? sb.members : [],
+          editors: Array.isArray(sb.editors) ? sb.editors : [],
           snapshot: sb.snapshot,
           participants: Array.isArray(sb.participants) ? sb.participants : [],
           // persist secret locally only
@@ -154,8 +154,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       name,
       createdAt: nowUtc(),
       authorPubKey,
-      // include owner as a member immediately for simpler rendering/logic
-      members: authorPubKey ? [authorPubKey] : [],
+      // include owner as an editor immediately for simpler rendering/logic
+      editors: authorPubKey ? [authorPubKey] : [],
       participants: [
         { id: shortId(), name: 'Bob' },
         { id: shortId(), name: 'Alice' },
@@ -207,7 +207,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         name: items.value[idx].name,
         createdAt: items.value[idx].createdAt,
         authorPubKey: items.value[idx].authorPubKey,
-        members: Array.isArray(items.value[idx].members) ? items.value[idx].members : [],
+        editors: Array.isArray(items.value[idx].editors) ? items.value[idx].editors : [],
         snapshot: items.value[idx].snapshot,
         participants: Array.isArray(items.value[idx].participants) ? items.value[idx].participants : [],
   secret: items.value[idx].secret,
@@ -218,7 +218,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   }
 
   // ---------- Board PRE (lik::brd::<id>) helpers (encrypted content) ----------
-  type BoardPRE = { id: string; name: string; owner: string; members: string[]; participants?: { id: string; name: string }[] }
+  type BoardPRE = { id: string; name: string; owner: string; editors: string[]; participants?: { id: string; name: string }[] }
   function buildBoardPREPayload(boardId: string): BoardPRE | null {
     const sb = items.value.find((s) => s.id === boardId)
     if (!sb) return null
@@ -226,7 +226,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       id: sb.id,
       name: sb.name,
       owner: sb.authorPubKey,
-      members: Array.isArray(sb.members) ? sb.members.slice() : [],
+      editors: Array.isArray(sb.editors) ? sb.editors.slice() : [],
       participants: (sb.participants || []).map((p) => ({ id: p.id, name: p.name })),
     }
   }
@@ -314,7 +314,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     { deep: true }
   )
 
-  // Auto-publish board PRE by owner when name/members change
+  // Auto-publish board PRE by owner when name/editors change
   let preTimer: ReturnType<typeof setTimeout> | null = null
   watch(
     items,
@@ -326,7 +326,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
           const me = useUserStore().getPubKey()
           for (const sb of items.value) {
             if (!me || sb.authorPubKey !== me) continue
-            const sig = JSON.stringify({ n: sb.name, o: sb.authorPubKey, m: (sb.members || []).slice().sort() })
+            const sig = JSON.stringify({ n: sb.name, o: sb.authorPubKey, e: (sb.editors || []).slice().sort() })
             const prev = boardSig.get(sb.id)
             if (sig !== prev) {
               boardSig.set(sb.id, sig)
@@ -339,7 +339,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     { deep: true }
   )
 
-  // Keep profiles store subscribed to all members across scoreboards
+  // Keep profiles store subscribed to all editors across scoreboards
   watch(
     items,
     (list) => {
@@ -347,7 +347,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         const prof = useProfilesStore()
         const allMembers = new Set<string>()
         for (const sb of list) {
-          for (const m of sb.members) {
+          for (const m of (sb.editors || [])) {
             if (m) {
               allMembers.add(String(m))
             }
@@ -435,9 +435,9 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     }
     const sb = items.value.find((s) => s.id === boardId)
     if (!sb) return
-    const members = Array.isArray(sb.members) ? sb.members : []
+    const editors = Array.isArray(sb.editors) ? sb.editors : []
     try {
-      const unsub = subscribeCRDT(boardId, members)
+      const unsub = subscribeToBoardCRDT(boardId, editors)
       crdtUnsubById.set(boardId, unsub)
     } catch {}
   }
@@ -472,6 +472,9 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
           const content = String(evt?.content || '')
           const sb = items.value.find((s) => s.id === boardId)
           if (!sb || !sb.secret) return
+          // Defense-in-depth: ensure only owner-authored metadata is processed
+          const evtAuthor = String(evt?.pubkey || '')
+          if (ownerPubkey && evtAuthor && evtAuthor !== String(ownerPubkey)) return
           // Decrypt metadata
           const metaStrPromise = import('@/lib/utils').then(({ aesDecryptFromBase64 }) => aesDecryptFromBase64(String(sb.secret), content))
           void (async () => {
@@ -480,16 +483,22 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
               const meta = JSON.parse(metaStr)
               const sb2 = items.value.find((s) => s.id === boardId)
               if (!sb2) return
+              // Validate owner consistency
+              const metaOwner = String(meta?.owner || '')
+              if (metaOwner && sb2.authorPubKey && metaOwner !== sb2.authorPubKey) {
+                // If we already know an owner and it differs from meta, ignore this event
+                return
+              }
               // Update fields if changed
               const nextName = String(meta?.name || sb2.name)
               const nextOwner = String(meta?.owner || sb2.authorPubKey)
-              const nextMembers = Array.isArray(meta?.members) ? meta.members.map(String) : (sb2.members || [])
+              const nextEditors = Array.isArray(meta?.editors) ? meta.editors.map(String) : (sb2.editors || [])
               let changed = false
               if (sb2.name !== nextName) { sb2.name = nextName; changed = true }
               if (sb2.authorPubKey !== nextOwner) { sb2.authorPubKey = nextOwner; changed = true }
-              const curMembers = (sb2.members || []).slice().sort().join(',')
-              const newMembers = nextMembers.slice().sort().join(',')
-              if (curMembers !== newMembers) { sb2.members = nextMembers; changed = true }
+              const curEditors = (sb2.editors || []).slice().sort().join(',')
+              const newEditors = nextEditors.slice().sort().join(',')
+              if (curEditors !== newEditors) { sb2.editors = nextEditors; changed = true }
               if (changed) void saveAll(items.value)
               // Sync participants if present
               try {
@@ -535,8 +544,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   async function approve(boardId: string, eventId: string, pubkey: string) {
     const sb = items.value.find((s) => s.id === boardId)
     if (!sb) return
-    if (!Array.isArray(sb.members)) sb.members = []
-    if (!sb.members.includes(pubkey)) sb.members.push(pubkey)
+  if (!Array.isArray(sb.editors)) sb.editors = []
+  if (!sb.editors.includes(pubkey)) sb.editors.push(pubkey)
   await saveAll(items.value)
   // Owner updates should re-publish board PRE
   void ensureBoardPREPublished(boardId)
@@ -621,7 +630,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       // 2) lik::crdt::<id> snapshot (anyone may publish; we use latest)
       try {
         const boardTag = `lik::brd::${id}`
-        const { event: brdEvt } = await fetchLatestPREByDTag(boardTag)
+        const { event: brdEvt } = await fetchLatestPREByDTag(boardTag, null)
         if (brdEvt && typeof brdEvt.content === 'string') {
           try {
             // Decrypt board metadata with provided secret
@@ -632,7 +641,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
               console.error('Invalid board metadata')
               return { ok: false, reason: 'bad-meta' }
             }
-            if (!Array.isArray(meta.members)) {
+            if (!Array.isArray(meta.editors)) {
               return { ok: false, reason: 'bad-meta' }
             }
             // We already returned earlier if this board existed; create local placeholder
@@ -641,35 +650,40 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
               name: String(meta.name),
               createdAt: nowUtc(),
               authorPubKey: String(meta.owner),
-              members: meta.members.map(String),
+              editors: meta.editors.map(String),
               participants: Array.isArray(meta.participants)
                 ? meta.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') }))
                 : [],
               secret,
             }
             items.value.push(sb)
-            // tighten subscription to owner if known
+            // tighten subscription to owner if known (onlhy owner can update meta)
             subscribeBoardMeta(id, sb.authorPubKey)
           } catch {}
         }
 
         const crdtTag = `lik::crdt::${id}`
-        const { event: crdtEvt } = await fetchLatestPREByDTag(crdtTag)
-        if (crdtEvt && typeof crdtEvt.content === 'string') {
-          try {
-            // Snapshot now may be encrypted; attempt decryption with provided secret
-            let snapshot: any = null
+        // Only prefetch CRDT after metadata was obtained so we can trust authors list
+        const cur = items.value.find((s) => s.id === id)
+        if (cur) {
+          const allowedAuthors = [cur.authorPubKey, ...(cur.editors || [])].filter(Boolean)
+          const { event: crdtEvt } = await fetchLatestPREByDTag(crdtTag, allowedAuthors.length ? allowedAuthors : null)
+          if (crdtEvt && typeof crdtEvt.content === 'string') {
             try {
-              const { aesDecryptFromBase64 } = await import('@/lib/utils')
-              const plain = await aesDecryptFromBase64(secret, crdtEvt.content)
-              snapshot = JSON.parse(plain)
-            } catch {
-              // If decryption fails, treat as empty snapshot (cannot recover)
-              snapshot = null
-            }
-            const idx = items.value.findIndex((s) => s.id === id)
-            if (idx !== -1 && snapshot) items.value[idx].snapshot = snapshot
-          } catch {}
+              // Snapshot now may be encrypted; attempt decryption with provided secret
+              let snapshot: any = null
+              try {
+                const { aesDecryptFromBase64 } = await import('@/lib/utils')
+                const plain = await aesDecryptFromBase64(secret, crdtEvt.content)
+                snapshot = JSON.parse(plain)
+              } catch {
+                // If decryption fails, treat as empty snapshot (cannot recover)
+                snapshot = null
+              }
+              const idx = items.value.findIndex((s) => s.id === id)
+              if (idx !== -1 && snapshot) items.value[idx].snapshot = snapshot
+            } catch {}
+          }
         }
 
         // persist any changes

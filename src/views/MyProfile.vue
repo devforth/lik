@@ -228,8 +228,8 @@ async function onImport() {
     // For each candidate board id, fetch brd and crdt PREs; decrypt using owner-derived secret and add only if both available
     for (const id of brdIds) {
       try {
-        const { event: brdEvt } = await fetchLatestPREByDTag(`lik::brd::${id}`)
-        const { event: crdtEvt } = await fetchLatestPREByDTag(`lik::crdt::${id}`)
+        const { event: brdEvt } = await fetchLatestPREByDTag(`lik::brd::${id}`, null)
+        const { event: crdtEvt } = await fetchLatestPREByDTag(`lik::crdt::${id}`, null)
         if (!brdEvt || !crdtEvt) continue
         // Derive board secret as sha512Hex(`${priv}::${id}`)
         const { sha512Hex, aesDecryptFromBase64 } = await import('@/lib/utils')
@@ -247,7 +247,7 @@ async function onImport() {
           name: String(meta.name || 'Scoreboard'),
           createdAt: Date.now(),
           authorPubKey: String(meta.owner || pkHex),
-          members: Array.isArray(meta.members) ? meta.members.map(String) : [],
+          editors: Array.isArray(meta.editors) ? meta.editors.map(String) : [],
           participants: Array.isArray(meta.participants) ? meta.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') })) : [],
           snapshot,
           secret,

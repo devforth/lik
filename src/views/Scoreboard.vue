@@ -14,6 +14,10 @@
     <div class="flex items-start justify-between gap-2">
       <div>
         <h1 class="text-2xl font-semibold">{{ scoreboard?.name ?? 'Scoreboard' }}</h1>
+        <div v-if="!canEdit" class="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">
+          <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+          Read-only
+        </div>
       </div>
 
       <!-- Actions: kebab menu -->
@@ -82,7 +86,7 @@
                 <td :colspan="Math.min(2, participants.length)" class="pt-2 pb-1">
                   <div class="flex items-center justify-between gap-2">
                     <div class="text-sm font-semibold">{{ cat.value.name || 'Untitled category' }}</div>
-                    <DropdownMenu>
+                    <DropdownMenu v-if="canEdit">
                       <DropdownMenuTrigger as-child>
                         <Button variant="ghost" size="icon" class="h-7 w-7">
                           <MoreVertical class="h-4 w-4" />
@@ -103,11 +107,11 @@
                 <td v-for="p in participants" :key="p.id + ':' + cat.key" class="pb-4" :style="{ minWidth: '40vw', width: '40vw' }">
                   <div class="flex flex-col items-center justify-center gap-2">
                     <div class="flex items-center justify-center gap-3">
-                      <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, p.id, -1)" aria-label="Decrement">
+                      <Button variant="outline" size="icon" class="h-8 w-8" :disabled="!canEdit" @click="changeScore(cat.key, p.id, -1)" aria-label="Decrement">
                         <ChevronDown class="h-4 w-4" />
                       </Button>
                       <div class="min-w-[3ch] text-center tabular-nums">{{ scoreFor(cat.value, p.id) }}</div>
-                      <Button variant="outline" size="icon" class="h-8 w-8" @click="changeScore(cat.key, p.id, 1)" aria-label="Increment">
+                      <Button variant="outline" size="icon" class="h-8 w-8" :disabled="!canEdit" @click="changeScore(cat.key, p.id, 1)" aria-label="Increment">
                         <ChevronUp class="h-4 w-4" />
                       </Button>
                     </div>
@@ -118,6 +122,7 @@
                         size="icon"
                         class="h-5 w-5"
                         :class="{ 'bg-primary text-primary-foreground border-primary': hasPriority(cat.key, p.id) }"
+                        :disabled="!canEdit"
                         @click="togglePriority(cat.key, p.id)"
                         aria-label="Toggle priority"
                       >
@@ -142,7 +147,7 @@
           <DrawerHeader>
             <DrawerTitle>Delete scoreboard?</DrawerTitle>
             <DrawerDescription>
-              Are you sure you want to delete this scoreboard? If it exists for other members, they have to delete it by themselves.
+              Are you sure you want to delete this scoreboard? If it exists for other editors, they have to delete it by themselves.
             </DrawerDescription>
           </DrawerHeader>
           <DrawerFooter>
@@ -179,6 +184,9 @@
             <div class="w-full text-left text-sm text-muted-foreground">
               Ask the invited user to open the LIK app, tap "Join to scoreboard" in the sidebar, then scan this QR code or paste the code above.
             </div>
+            <div class="w-full text-left text-xs text-muted-foreground">
+              Note: scanning grants read-only access. You'll get a popup to approve editing rights.
+            </div>
           </div>
 
           <DrawerFooter>
@@ -196,7 +204,7 @@
         <div class="mx-auto w-full max-w-md">
           <DrawerHeader>
             <DrawerTitle>Scoreboard settings</DrawerTitle>
-            <DrawerDescription>Owner and members</DrawerDescription>
+            <DrawerDescription>Owner and editors</DrawerDescription>
           </DrawerHeader>
 
           <div class="px-4 pb-4 space-y-6">
@@ -210,7 +218,7 @@
             </div>
 
             <div>
-              <div class="text-xs text-muted-foreground mb-2">Members ({{ members.length }})</div>
+              <div class="text-xs text-muted-foreground mb-2">Editors ({{ members.length }})</div>
               <div v-if="members.length" class="space-y-2">
                 <div v-for="m in members" :key="m.pubkey" class="flex items-center gap-3">
                   <img :src="m.picture || ''" class="h-8 w-8 rounded-md bg-muted object-cover" alt="avatar" />
@@ -219,7 +227,7 @@
                   </div>
                 </div>
               </div>
-              <div v-else class="text-sm text-muted-foreground">No members yet</div>
+              <div v-else class="text-sm text-muted-foreground">No editors yet</div>
             </div>
           </div>
 
@@ -235,7 +243,7 @@
     <!-- Owner: last 3 join requests -->
     <div v-if="isOwner && myRequests.length" class="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur border-t p-3">
       <div class="max-w-screen-md mx-auto">
-        <div class="text-xs text-muted-foreground mb-2">Recent join requests</div>
+        <div class="text-xs text-muted-foreground mb-2">Requests to edit scoreboard</div>
         <div class="space-y-2">
           <div v-for="req in myRequests" :key="req.id" class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-3 min-w-0">
@@ -256,7 +264,7 @@
   </div>
 
   <!-- Floating create-category action -->
-  <div v-if="!notFound" class="pointer-events-none">
+  <div v-if="!notFound && canEdit" class="pointer-events-none">
     <Button
       variant="default"
       size="icon"
@@ -417,7 +425,14 @@ import QrcodeVue from 'qrcode.vue'
 import { useProfilesStore } from '@/stores/profiles'
 import { removeParticipantData as removeParticipantDataCRDT } from '@/nostrToCRDT'
 import shortId from '@/lib/utils'
-import { addCategory as addCategoryCRDT, addScore as addScoreCRDT, subscribeToBoard as subscribeCRDT, editCat as editCatCRDT, setPriority as setPriorityCRDT, clearPriority as clearPriorityCRDT } from '@/nostrToCRDT'
+import { 
+  addCategory as addCategoryCRDT, 
+  addScore as addScoreCRDT, 
+  subscribeToBoardCRDT, 
+  editCat as editCatCRDT, 
+  setPriority as setPriorityCRDT, clearPriority as clearPriorityCRDT 
+} from '@/nostrToCRDT'
+
 const route = useRoute()
 const router = useRouter()
 const id = computed(() => String(route.params.id || ''))
@@ -519,6 +534,18 @@ async function copyBoardId() {
 // Owner-only: last 3 join requests real-time UI
 const myRequests = computed(() => store.lastRequests[id.value] || [])
 const isOwner = computed(() => store.isOwner(id.value, user.getPubKey()))
+const canEdit = computed(() => {
+  const me = user.getPubKey() || ''
+  const sb = scoreboard.value
+  if (!sb || !me) {
+    return false
+  }
+  if (sb.authorPubKey === me) {
+    return true
+  }
+  const list = Array.isArray(sb.editors) ? sb.editors : []
+  return list.includes(me)
+})
 
 function approveJoin(reqId: string, pubkey: string) {
   if (!id.value) return
@@ -569,7 +596,7 @@ const ownerProfile = computed(() => {
   return pub ? profiles.get(pub) : null
 })
 const members = computed(() => {
-  const list = scoreboard.value?.members || []
+  const list = scoreboard.value?.editors || []
   return list
     .filter(Boolean)
     .map((pk) => profiles.get(pk) || { pubkey: pk, name: '', picture: '', updatedAt: 0 })
@@ -599,7 +626,7 @@ function scoreFor(cat: any, participantId: string): number {
 
 function changeScore(categoryKey: string, participantId: string, delta: -1 | 1) {
   if (!id.value) return
-  try { addScoreCRDT(id.value, categoryKey, participantId, delta) } catch {}
+  addScoreCRDT(id.value, categoryKey, participantId, delta)
 }
 
 // Priority helpers
@@ -637,10 +664,10 @@ function goCreate() {
 let unsubCRDT: null | (() => void) = null
 let unsubBRD: null | (() => void) = null
 watch(
-  () => [ready.value, id.value, scoreboard.value?.members, user.getPubKey()],
+  () => [ready.value, id.value, scoreboard.value?.editors, user.getPubKey()],
   async () => {
     if (!ready.value || !id.value || !scoreboard.value) return
-    // Owner ensures board PRE published everywhere (name/owner/members)
+  // Owner ensures board PRE published everywhere (name/owner/editors)
     if (isOwner.value) {
       try { 
         await store.verifyBoardPREEverywhere(id.value) 
@@ -660,14 +687,14 @@ watch(
         unsubBRD = () => store.unsubscribeBoardMeta(id.value)
       } catch {}
     }
-    // Subscribe to CRDT updates from all members except self
+  // Subscribe to CRDT updates from all editors except self
     if (unsubCRDT) { 
       try { unsubCRDT() } catch {}; 
       unsubCRDT = null 
     }
-    const members = Array.isArray(scoreboard.value.members) ? scoreboard.value.members : []
+  const members = Array.isArray(scoreboard.value.editors) ? scoreboard.value.editors : []
     try { 
-      unsubCRDT = subscribeCRDT(id.value, members) 
+      unsubCRDT = subscribeToBoardCRDT(id.value, members) 
     } catch {}
   },
   { immediate: true, deep: true }
