@@ -643,8 +643,6 @@ function createCategory() {
   if (!id.value || !name) return
   const cid = shortId()
   addCategoryCRDT(id.value, cid, name)
-// Append to local logs
-  store.addLogEvent(id.value, 'add-cat', cid, null)
   createOpen.value = false
   newCategoryName.value = ''
  
@@ -737,7 +735,6 @@ function scoreFor(cat: any, participantId: string): number {
 function changeScore(categoryKey: string, participantId: string, delta: -1 | 1) {
   if (!id.value) return
   addScoreCRDT(id.value, categoryKey, participantId, delta)
-  store.addLogEvent(id.value, delta === 1 ? '+1' : '-1', categoryKey, participantId)
 }
 
 // Priority helpers
@@ -761,10 +758,8 @@ function togglePriority(categoryKey: string, participantId: string) {
   // Toggle: if already has prio -> clear; else set prio (single selection semantics are handled in setPriority)
   if (hasPriority(categoryKey, participantId)) {
     clearPriorityCRDT(id.value, categoryKey, participantId)
-    store.addLogEvent(id.value, 'unprio', categoryKey, participantId)
   } else {
     setPriorityCRDT(id.value, categoryKey, participantId)
-    store.addLogEvent(id.value, 'prio', categoryKey, participantId)
   }
 }
 
@@ -774,43 +769,39 @@ function goCreate() {
   router.push({ name: 'new-scoreboard' })
 }
 
-// On mount: if owner, verify board PRE exists across relays; else subscribe to board metadata PRE; also subscribe to CRDT PRE for updates.
+// Explicit subscriptions/unsubscriptions for board metadata and CRDT
 let unsubCRDT: null | (() => void) = null
 let unsubBRD: null | (() => void) = null
-watch(
-  () => [ready.value, id.value, scoreboard.value?.editors, user.getPubKey()],
-  async () => {
-    if (!ready.value || !id.value || !scoreboard.value) return
-  // Owner ensures board PRE published everywhere (name/owner/editors)
-    if (isOwner.value) {
-      try { 
-        await store.verifyBoardPREEverywhere(id.value) 
-      } catch {}
-      // if previously subscribed as non-owner, clean it up
-      if (unsubBRD) { 
-        try { unsubBRD() } catch {}; 
-        unsubBRD = null 
-      }
-    }
-    // Non-owner: subscribe to board metadata updates
-    if (!isOwner.value) {
-      if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
-      try {
-        store.subscribeBoardMeta(id.value, scoreboard.value.authorPubKey)
-        // store manages its own unsubscribe map; we keep a no-op handle to align lifecycle
-        unsubBRD = () => store.unsubscribeBoardMeta(id.value)
-      } catch {}
-    }
-  // Subscribe to CRDT updates via store (includes owner + editors)
-    if (unsubCRDT) { 
-      try { unsubCRDT() } catch {}; 
-      unsubCRDT = null 
-    }
-    store.subscribeBoardCRDT(id.value)
-    unsubCRDT = () => store.unsubscribeBoardCRDT(id.value)
-  },
-  { immediate: true, deep: true }
-)
+
+function subscribeBoardMetaIfNeeded() {
+  if (!scoreboard.value || !id.value) return
+  if (isOwner.value) {
+    // Owner: verify board PRE everywhere
+    store.verifyBoardPREEverywhere(id.value)
+    if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
+  } else {
+    if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
+    store.subscribeBoardMeta(id.value, scoreboard.value.authorPubKey)
+    unsubBRD = () => store.unsubscribeBoardMeta(id.value)
+  }
+}
+
+function subscribeBoardCRDT() {
+  if (!id.value) return
+  if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
+  store.subscribeBoardCRDT(id.value)
+  unsubCRDT = () => store.unsubscribeBoardCRDT(id.value)
+}
+
+onMounted(() => {
+  subscribeBoardMetaIfNeeded()
+  subscribeBoardCRDT()
+})
+
+onBeforeUnmount(() => {
+  if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
+  if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
+})
 
 onBeforeUnmount(() => {
   if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
@@ -865,7 +856,7 @@ function addParticipant() {
     const newId = (crypto.randomUUID().slice(0, 6))
     next.push({ id: newId, name })
     scoreboard.value.participants = next
-  void store.ensureBoardPREPublished(id.value)
+    void store.ensureBoardPREPublished(id.value, 'add participant')
     // owner publishes updated board metadata with participants
     // persisted by store watcher
     addPartOpen.value = false
@@ -887,7 +878,7 @@ async function renameParticipant() {
     if (!scoreboard.value) return
     const list = (scoreboard.value.participants || []).map((p) => p.id === renamePartId.value ? { ...p, name } : p)
     scoreboard.value.participants = list
-  void store.ensureBoardPREPublished(id.value)
+    void store.ensureBoardPREPublished(id.value, 'rename participant')
     renamePartOpen.value = false
     renamePartId.value = ''
     renamePartName.value = ''
@@ -908,7 +899,7 @@ async function confirmDeleteParticipant() {
     // Remove participant from board model
     if (scoreboard.value) {
       scoreboard.value.participants = (scoreboard.value.participants || []).filter((p) => p.id !== deletePartId.value)
-  void store.ensureBoardPREPublished(id.value)
+      void store.ensureBoardPREPublished(id.value, 'delete participant')
     }
   } finally {
     deletePartOpen.value = false

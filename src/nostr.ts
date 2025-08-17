@@ -182,7 +182,8 @@ export async function send(
   kind: number,
   content: string,
   tags: string[][] = [],
-  relays: string[] = RELAYS
+  originalContentForDbg: any = {},
+  relays: string[] = RELAYS,
 ) {
   try {
     const evt: EventTemplate = {
@@ -191,7 +192,7 @@ export async function send(
       tags: Array.isArray(tags) ? tags : [],
       content: String(content ?? ''),
     }
-    console.info('[nostr] sending event', { pubkeyHex, kind, content, tags, relays })
+    console.info('[nostr] sending event', { pubkeyHex, kind, content, tags, relays, originalContentForDbg})
     const sk = hexToBytes(String(privkeyHex))
     const rels = relays && relays.length ? relays : RELAYS
     const signed = finalizeEvent({ ...evt }, sk)
@@ -216,10 +217,11 @@ export async function sendPRE(
   privkeyHex: string,
   dTag: string,
   payload: string,
-  relays: string[] = RELAYS
+  originalContentForDbg: any = {},
+  relays: string[] = RELAYS,
 ) {
   const content = String(payload)
-  return send(pubkeyHex, privkeyHex, KIND_PRE, content, [[ 'd', String(dTag) ]], relays)
+  return send(pubkeyHex, privkeyHex, KIND_PRE, content, [[ 'd', String(dTag) ]], originalContentForDbg, relays)
 }
 
 /**
@@ -238,7 +240,7 @@ export async function publishProfileToRelays(
   relays: string[]
 ) {
   const obj = profile && typeof profile === 'object' ? profile : {}
-  return send(pubkeyHex, privkeyHex, 0, JSON.stringify(obj), [], relays)
+  return send(pubkeyHex, privkeyHex, 0, JSON.stringify(obj), [], obj, relays)
 }
 
 /**
@@ -379,6 +381,7 @@ export async function publishPREToRelays(
   privkeyHex: string,
   dTag: string,
   payload: string,
+  originalContentForDbg: any = {},
   relays: string[] = RELAYS
 ) {
   const hashes = await getPREHashPerRelay(dTag, [pubkeyHex], relays, 3000)
@@ -390,7 +393,7 @@ export async function publishPREToRelays(
     need = relays.slice()
   }
   if (!need.length) return
-  return sendPRE(pubkeyHex, privkeyHex, dTag, payload, need)
+  return sendPRE(pubkeyHex, privkeyHex, dTag, payload, originalContentForDbg, need)
 }
 
 /** Fetch the latest PRE by d-tag across relays; returns latest event and relay. */
@@ -411,10 +414,23 @@ export async function fetchLatestPREByDTag(
           [ (() => { const f: any = { kinds: [KIND_PRE], '#d': [String(dTag)] }; if (authors && authors.length) f.authors = authors.map(String); return f })() ],
           {
             onevent: (evt) => {
-              if (!latest || Number(evt?.created_at || 0) > Number(latest?.created_at || 0)) {
+              const curTs = Number(evt?.created_at || 0)
+              const bestTs = Number(latest?.created_at || 0)
+              if (!latest || curTs > bestTs) {
                 latest = evt
                 latestRelay = relay
                 console.info('[nostr] latest PRE event', { dTag, latest, relay })
+                return
+              }
+              if (curTs === bestTs) {
+                // Tie-break by event id lexicographically to ensure deterministic latest
+                const curId = String(evt?.id || '')
+                const bestId = String(latest?.id || '')
+                if (curId && bestId && curId.localeCompare(bestId) > 0) {
+                  latest = evt
+                  latestRelay = relay
+                  console.info('[nostr] latest PRE event (tie-break)', { dTag, latest, relay })
+                }
               }
             },
             oneose: () => {

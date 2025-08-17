@@ -4,6 +4,8 @@ import { SimplePool } from 'nostr-tools/pool'
 import type { Filter } from 'nostr-tools'
 import { RELAYS, sendPRE, KIND_PRE } from '@/nostr'
 import { canonicalJSONStringify } from '@/lib/utils'
+import shortId from '@/lib/utils'
+import { nowUtc } from '@/time-sync'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { ScoreboardCRDT, type EndingState, type LogEntry } from '@/crdt'
 import { useUserStore } from '@/stores/user'
@@ -18,6 +20,28 @@ function isEditor(boardId: string, me: string): boolean {
   if (String(sb.authorPubKey || '') === String(me)) return true
   const editors = Array.isArray(sb.editors) ? sb.editors : []
   return editors.includes(String(me))
+}
+
+// Append a log entry into a given EndingState.events immutably, cap at 100, sort by ts then id
+function appendLogToState(prev: EndingState, entry: LogEntry): EndingState {
+  const existing = Array.isArray(prev.events) ? prev.events as LogEntry[] : []
+  const seen = new Set(existing.map((e) => String(e?.[0] ?? '')))
+  const nextEvents = seen.has(String(entry[0])) ? existing : [...existing, entry]
+  nextEvents.sort((a, b) => {
+    const ta = Number(a[2] ?? 0), tb = Number(b[2] ?? 0)
+    if (ta !== tb) return ta - tb
+    return String(a[0] ?? '').localeCompare(String(b[0] ?? ''))
+  })
+  const trimmed = nextEvents.slice(-100)
+  return { ...(prev as any), events: trimmed }
+}
+
+type ActionLog = '+1' | '-1' | 'add-cat' | 'prio' | 'unprio'
+function appendActionLog(prev: EndingState, me: string, action: ActionLog, categoryId: string, participantId?: string | null): EndingState {
+  const eid = shortId()
+  const tsSec = Math.floor(nowUtc() / 1000)
+  const entry: LogEntry = [eid, me, tsSec, String(categoryId), action, participantId == null ? null : String(participantId)]
+  return appendLogToState(prev, entry)
 }
 
 async function publishSnapshot(boardId: string, state: EndingState) {
@@ -43,7 +67,7 @@ async function publishSnapshot(boardId: string, state: EndingState) {
     const { aesEncryptToBase64 } = await import('@/lib/utils')
     const canon = canonicalJSONStringify(state)
     const enc = await aesEncryptToBase64(secret, canon)
-    await sendPRE(p.pubkeyHex, p.privkeyHex, tagD, enc)
+    await sendPRE(p.pubkeyHex, p.privkeyHex, tagD, enc, state)
   } catch (e) {
     // non-fatal
   }
@@ -119,7 +143,9 @@ export function addScore(boardId: string, categoryKey: string, participantId: st
   const board = store.items.find((s) => s.id === boardId)
   if (!board) return null
   const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
-  const next = crdt.addScore(categoryKey, participantId, delta)
+  let next = crdt.addScore(categoryKey, participantId, delta)
+  // Append log inline to snapshot (avoid second publish path)
+  next = appendActionLog(next, me, delta === 1 ? '+1' : '-1', String(categoryKey), String(participantId))
   void store.updateSnapshot(boardId, next)
   // Publish PRE snapshot for others to merge
   void publishSnapshot(boardId, next)
@@ -168,11 +194,12 @@ export function addCategory(boardId: string, id: string, name: string): EndingSt
   const baseCrdt = new ScoreboardCRDT(me, board.snapshot || undefined)
   const merged = baseCrdt.merge(afterPrio)
 
-  // Persist via store method
-  void store.updateSnapshot(boardId, merged)
+  // Append log inline (add-cat)
+  const withLog = appendActionLog(merged, me, 'add-cat', String(id), null)
+  void store.updateSnapshot(boardId, withLog)
   // Publish PRE snapshot for others to merge
-  void publishSnapshot(boardId, merged)
-  return merged
+  void publishSnapshot(boardId, withLog)
+  return withLog
 }
 
 /**
@@ -263,7 +290,9 @@ export function setPriority(boardId: string, categoryKey: string, participantId:
   }
 
   const base = new ScoreboardCRDT(me, board.snapshot || undefined)
-  const merged = base.merge(delta.getState())
+  let merged = base.merge(delta.getState())
+  // Append log inline (prio)
+  merged = appendActionLog(merged, me, 'prio', String(categoryKey), String(participantId))
   void store.updateSnapshot(boardId, merged)
   void publishSnapshot(boardId, merged)
   return merged
@@ -298,7 +327,9 @@ export function clearPriority(boardId: string, categoryKey: string, participantI
   }
 
   const base = new ScoreboardCRDT(me, board.snapshot || undefined)
-  const merged = base.merge(delta.getState())
+  let merged = base.merge(delta.getState())
+  // Append log inline (unprio)
+  merged = appendActionLog(merged, me, 'unprio', String(categoryKey), String(participantId))
   void store.updateSnapshot(boardId, merged)
   void publishSnapshot(boardId, merged)
   return merged
@@ -331,7 +362,7 @@ export function appendLogEvent(boardId: string, entry: LogEntry): EndingState | 
   const trimmed = nextEvents.slice(-100)
   const next: EndingState = { ...(cur as any), events: trimmed }
   void store.updateSnapshot(boardId, next)
-  void publishSnapshot(boardId, next)
+  // Do NOT publish here to avoid double-send; actions will publish combined snapshot
   return next
 }
 

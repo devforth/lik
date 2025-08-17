@@ -46,6 +46,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   let __initPromise: Promise<void> | undefined
   // track serialized signature of board fields to detect changes
   const boardSig = new Map<string, string>()
+  // track CRDT subscription authors signature per board to avoid needless resubscribes
+  const crdtSigById = new Map<string, string>()
 
   // IndexedDB helpers (lazy)
   const STORE = 'scoreboards'
@@ -170,7 +172,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     subscribeJoinTagFor(id)
 
     // Publish encrypted board metadata PRE
-    void ensureBoardPREPublished(id).catch(() => {})
+    void ensureBoardPREPublished(id, 'scoreboards.createScoreboard').catch(() => {})
     return sb
   }
 
@@ -232,25 +234,27 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     }
   }
 
-  async function ensureBoardPREPublished(boardId: string) {
+  async function ensureBoardPREPublished(boardId: string, caller?: string) {
     const user = useUserStore()
     const me = user.getPubKey()
     const sb = items.value.find((s) => s.id === boardId)
-    if (!sb || !me) return
-    if (sb.authorPubKey !== me) return // only owner publishes
+    if (!sb || !me) { console.log('[scoreboards] ensureBoardPREPublished: missing sb or me'); return }
+    if (sb.authorPubKey !== me) { console.log('[scoreboards] ensureBoardPREPublished: not owner'); return } // only owner publishes
     if (!sb.secret) {
+      console.log('[scoreboards] ensureBoardPREPublished: secret not ready')
       // Secret not ready; skip for now (creator IIFE triggers again once secret is set)
       return
     }
     const p = await user.ensureUser()
     const tag = `lik::brd::${boardId}`
     const payload = buildBoardPREPayload(boardId)
-    if (!payload) return
+    if (!payload) { console.log('[scoreboards] ensureBoardPREPublished: no payload'); return }
     try {
       // Encrypt metadata with board secret before publish
       const { aesEncryptToBase64 } = await import('@/lib/utils')
       const enc = await aesEncryptToBase64(String(sb.secret), JSON.stringify(payload))
-      await publishPREToRelays(p.pubkeyHex, p.privkeyHex, tag, enc, RELAYS)
+      console.log('[scoreboards] ensureBoardPREPublished: publishing PRE', { pubkey: p.pubkeyHex, tag, payload, caller, boardId })
+      await publishPREToRelays(p.pubkeyHex, p.privkeyHex, tag, enc, payload, RELAYS)
     } catch (e) {
       console.warn('[scoreboards] ensureBoardPREPublished failed', e)
     }
@@ -263,7 +267,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     if (!sb || !me) return
     // Non-owner can't publish; just no-op
     if (sb.authorPubKey !== me) return
-    await ensureBoardPREPublished(boardId)
+    await ensureBoardPREPublished(boardId, 'scoreboardMount, verifyBoardPREEverywhere'); 
   }
 
   // hydrate from IndexedDB on first use (lazy, idempotent)
@@ -331,7 +335,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
             const prev = boardSig.get(sb.id)
             if (sig !== prev) {
               boardSig.set(sb.id, sig)
-              void ensureBoardPREPublished(sb.id)
+              void ensureBoardPREPublished(sb.id, 'watch items in pinia scoreboards')
             }
           }
         } catch {}
@@ -429,11 +433,6 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
 
   // CRDT subscriptions management
   function subscribeBoardCRDT(boardId: string) {
-    // close existing
-    if (crdtUnsubById.has(boardId)) {
-      try { crdtUnsubById.get(boardId)!() } catch {}
-      crdtUnsubById.delete(boardId)
-    }
     const sb = items.value.find((s) => s.id === boardId)
     if (!sb) return
   // Use editors as-is; it includes the owner by convention
@@ -443,20 +442,35 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     if (!sb.editors.length) {
       throw new Error('Empty editors array')
     }
+    // Compute a stable signature of authors list to detect changes
+    const sig = sb.editors.slice().sort().join(',')
+    const prevSig = crdtSigById.get(boardId)
+    if (prevSig === sig && crdtUnsubById.has(boardId)) {
+      // Already subscribed with same authors; no-op
+      return
+    }
+    // If signature changed, close previous subscription before opening a new one
+    if (crdtUnsubById.has(boardId)) {
+      try { crdtUnsubById.get(boardId)!() } catch {}
+      crdtUnsubById.delete(boardId)
+    }
     const unsub = subscribeToBoardCRDT(boardId, sb.editors)
     crdtUnsubById.set(boardId, unsub)
+    crdtSigById.set(boardId, sig)
   }
 
   function unsubscribeBoardCRDT(boardId: string) {
     if (!crdtUnsubById.has(boardId)) return
     try { crdtUnsubById.get(boardId)!() } catch {}
     crdtUnsubById.delete(boardId)
+  crdtSigById.delete(boardId)
   }
 
   function stopAllCRDTSubscriptions() {
     for (const [id, fn] of crdtUnsubById.entries()) {
       try { fn() } catch {}
       crdtUnsubById.delete(id)
+  crdtSigById.delete(id)
     }
   }
 
@@ -549,11 +563,11 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   async function approve(boardId: string, eventId: string, pubkey: string) {
     const sb = items.value.find((s) => s.id === boardId)
     if (!sb) return
-  if (!Array.isArray(sb.editors)) sb.editors = []
-  if (!sb.editors.includes(pubkey)) sb.editors.push(pubkey)
-  await saveAll(items.value)
-  // Owner updates should re-publish board PRE
-  void ensureBoardPREPublished(boardId)
+    if (!Array.isArray(sb.editors)) sb.editors = []
+    if (!sb.editors.includes(pubkey)) sb.editors.push(pubkey)
+    await saveAll(items.value)
+    // Owner updates should re-publish board PRE
+    void ensureBoardPREPublished(boardId, 'approve invite')
     // remove from lastRequests
     const list = lastRequests.value[boardId] || []
     lastRequests.value = { ...lastRequests.value, [boardId]: list.filter((r) => r.id !== eventId) }
@@ -580,7 +594,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     sb.name = n
     await saveAll(items.value)
     // owner refresh publish
-    void ensureBoardPREPublished(boardId)
+    void ensureBoardPREPublished(boardId, 'rename board')
   }
 
   // ---------- Events log helpers ----------
