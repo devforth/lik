@@ -5,7 +5,7 @@ import type { Filter } from 'nostr-tools'
 import { RELAYS, sendPRE, KIND_PRE } from '@/nostr'
 import { canonicalJSONStringify } from '@/lib/utils'
 import { useScoreboardsStore } from '@/stores/scoreboards'
-import { ScoreboardCRDT, type EndingState } from '@/crdt'
+import { ScoreboardCRDT, type EndingState, type LogEntry } from '@/crdt'
 import { useUserStore } from '@/stores/user'
 
 const pool = new SimplePool()
@@ -304,4 +304,35 @@ export function clearPriority(boardId: string, categoryKey: string, participantI
   return merged
 }
 
-export default { subscribeToBoardCRDT, addScore, addCategory, editCat, removeParticipantData, setPriority, clearPriority }
+/**
+ * Append a log entry into CRDT snapshot.events and publish. Used so editors can propagate activity logs via CRDT channel.
+ */
+export function appendLogEvent(boardId: string, entry: LogEntry): EndingState | null {
+  const store = useScoreboardsStore()
+  const me = useUserStore().getPubKey()
+  if (!me) throw new Error('No pubkey available')
+  if (!isEditor(boardId, me)) {
+    throw new Error('Not authorized to append log - insufficient permissions')
+  }
+  const board = store.items.find((s) => s.id === boardId)
+  if (!board) return null
+  const base = new ScoreboardCRDT(me, board.snapshot || undefined)
+  const cur = base.getState()
+  const existing = Array.isArray(cur.events) ? cur.events : []
+  const id0 = String(entry?.[0] || '')
+  const seen = new Set(existing.map((e) => String(e?.[0] || '')))
+  const nextEvents = seen.has(id0) ? existing : [...existing, entry]
+  // cap 100 by time then id
+  nextEvents.sort((a, b) => {
+    const ta = Number(a[2] || 0), tb = Number(b[2] || 0)
+    if (ta !== tb) return ta - tb
+    return String(a[0]||'').localeCompare(String(b[0]||''))
+  })
+  const trimmed = nextEvents.slice(-100)
+  const next: EndingState = { ...(cur as any), events: trimmed }
+  void store.updateSnapshot(boardId, next)
+  void publishSnapshot(boardId, next)
+  return next
+}
+
+export default { subscribeToBoardCRDT, addScore, addCategory, editCat, removeParticipantData, setPriority, clearPriority, appendLogEvent }

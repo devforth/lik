@@ -32,8 +32,12 @@ export interface CategoryPN {
   orderTs: number // last update ms for order
 }
 
+export type LogEntry = [string, string, number, string, string, string | null]
+
 export interface EndingState {
   categories: Record<string, CategoryPN> // key is category key (string)
+  // events log: [eventId, pubkey, tsSec, categoryId, action, participantId|null][]
+  events?: LogEntry[]
 }
 
 export class ScoreboardCRDT {
@@ -42,7 +46,7 @@ export class ScoreboardCRDT {
 
   constructor(actorId: string, initial?: Partial<EndingState>) {
     this.actorId = String(actorId)
-    this.state = { categories: {}, ...(initial || {}) }
+    this.state = { categories: {}, events: [], ...(initial || {}) }
   }
 
   getState(): EndingState {
@@ -156,6 +160,21 @@ export class ScoreboardCRDT {
         c.orderTs = oOrderTs
       }
     }
+    // Merge events: union by eventId, cap to last 100 by ts then id
+    try {
+      const cur = Array.isArray(this.state.events) ? this.state.events.slice() : []
+      const incoming = Array.isArray(other.events) ? other.events : []
+      const map = new Map<string, LogEntry>()
+      for (const e of cur) { if (e && e[0]) map.set(String(e[0]), e as LogEntry) }
+      for (const e of incoming) { if (e && e[0] && !map.has(String(e[0]))) map.set(String(e[0]), e as LogEntry) }
+      const list = Array.from(map.values())
+      list.sort((a, b) => {
+        const ta = Number(a[2] || 0), tb = Number(b[2] || 0)
+        if (ta !== tb) return ta - tb
+        return String(a[0]||'').localeCompare(String(b[0]||''))
+      })
+      this.state.events = list.slice(-100)
+    } catch {}
     return this.getState()
   }
 }

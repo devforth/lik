@@ -30,6 +30,10 @@
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" class="w-52">
+          <DropdownMenuItem @click="openLog()">
+            <Settings class="h-4 w-4" />
+            <span>Log</span>
+          </DropdownMenuItem>
           <DropdownMenuItem @click="openSettings()">
             <Settings class="h-4 w-4" />
             <span>Settings</span>
@@ -187,6 +191,48 @@
             </div>
             <div class="w-full text-left text-xs text-muted-foreground">
               Note: scanning grants read-only access. You'll get a popup to approve editing rights.
+            </div>
+          </div>
+
+          <DrawerFooter>
+            <DrawerClose as-child>
+              <Button variant="outline">Close</Button>
+            </DrawerClose>
+          </DrawerFooter>
+        </div>
+      </DrawerContent>
+    </Drawer>
+
+    <!-- Logs drawer -->
+    <Drawer v-model:open="logsOpen">
+      <DrawerContent>
+        <div class="mx-auto w-full max-w-md">
+          <DrawerHeader>
+            <DrawerTitle>Activity log</DrawerTitle>
+            <DrawerDescription>Last edits</DrawerDescription>
+          </DrawerHeader>
+
+          <div class="px-4 pb-4 space-y-3" v-if="logsOpen">
+            <div v-if="!logList.length" class="text-sm text-muted-foreground">No activity yet.</div>
+            <div v-for="e in logList" :key="e[0]" class="flex items-start gap-3">
+              <img :src="eAvatar(e[1])" class="h-8 w-8 rounded-md bg-muted object-cover" alt="avatar" />
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium truncate">{{ eName(e[1]) }}</div>
+                <div class="text-xs text-muted-foreground">{{ relTime(e[2]) }}</div>
+                <div class="text-sm mt-1">
+                  <span v-if="e[4] === '+1'">+1</span>
+                  <span v-else-if="e[4] === '-1'">-1</span>
+                  <span v-else-if="e[4] === 'add-cat'">Added category</span>
+                  <span v-else-if="e[4] === 'prio'">Star</span>
+                  <span v-else-if="e[4] === 'unprio'">Unstar</span>
+                  <template v-if="e[5]">
+                    <span class="text-muted-foreground"> for </span>
+                    <span>{{ participantName(e[5] || '') }}</span>
+                  </template>
+                  <span class="text-muted-foreground"> in </span>
+                  <span>"{{ categoryName(e[3]) }}"</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -483,6 +529,7 @@ const notFound = computed(() => ready.value && !scoreboard.value && !!id.value)
 const drawerOpen = ref(false)
 const inviteOpen = ref(false)
 const settingsOpen = ref(false)
+const logsOpen = ref(false)
 const copied = ref(false)
 // Invite/share code carries secret: lik::scoreboard_id::secret
 const boardId = computed(() => {
@@ -523,6 +570,9 @@ function openInvite() {
 }
 function openSettings() {
   settingsOpen.value = true
+}
+function openLog() {
+  logsOpen.value = true
 }
 function openAddParticipant() {
   newPartName.value = ''
@@ -592,13 +642,12 @@ function createCategory() {
   const name = newCategoryName.value.trim()
   if (!id.value || !name) return
   const cid = shortId()
-  try {
-    addCategoryCRDT(id.value, cid, name)
-    createOpen.value = false
-    newCategoryName.value = ''
-  } catch (e) {
-    // noop
-  }
+  addCategoryCRDT(id.value, cid, name)
+// Append to local logs
+  store.addLogEvent(id.value, 'add-cat', cid, null)
+  createOpen.value = false
+  newCategoryName.value = ''
+ 
 }
 
 // Rename category action
@@ -633,6 +682,36 @@ const members = computed(() => {
     .map((pk) => profiles.get(pk) || { pubkey: pk, name: '', picture: '', updatedAt: 0 })
 })
 
+// Logs helpers (lazy render when drawer open) — from CRDT snapshot.events
+const logList = computed(() => (logsOpen.value ? ((scoreboard.value?.snapshot?.events || []) as [string, string, number, string, string, string | null][]) : []))
+function eName(pubkey: string): string {
+  const p = profiles.get(pubkey)
+  return p?.name || short(pubkey)
+}
+function eAvatar(pubkey: string): string {
+  const p = profiles.get(pubkey)
+  return p?.picture || ''
+}
+function participantName(pid: string): string {
+  const list = scoreboard.value?.participants || []
+  const found = list.find((p) => p.id === pid)
+  return found?.name || pid
+}
+function categoryName(cid: string): string {
+  const cats = (scoreboard.value?.snapshot?.categories || {}) as Record<string, any>
+  const c = cats[cid]
+  const name = (c && typeof c === 'object') ? (c.name || c?.value?.name || '') : ''
+  return String(name || 'Untitled category')
+}
+function relTime(tsSec: number): string {
+  const now = Math.floor(Date.now() / 1000)
+  const d = Math.max(0, now - (Number(tsSec) || 0))
+  if (d < 60) return `${d}s ago`
+  if (d < 3600) return `${Math.floor(d/60)}m ago`
+  if (d < 86400) return `${Math.floor(d/3600)}h ago`
+  return `${Math.floor(d/86400)}d ago`
+}
+
 // Categories from snapshot, sorted by order then name, visible only, excluding ::prio shadow categories
 const categoriesList = computed(() => {
   const cats = (scoreboard.value?.snapshot?.categories || {}) as Record<string, any>
@@ -658,6 +737,7 @@ function scoreFor(cat: any, participantId: string): number {
 function changeScore(categoryKey: string, participantId: string, delta: -1 | 1) {
   if (!id.value) return
   addScoreCRDT(id.value, categoryKey, participantId, delta)
+  store.addLogEvent(id.value, delta === 1 ? '+1' : '-1', categoryKey, participantId)
 }
 
 // Priority helpers
@@ -679,10 +759,13 @@ function prioScoreFor(categoryKey: string, participantId: string): number {
 function togglePriority(categoryKey: string, participantId: string) {
   if (!id.value) return
   // Toggle: if already has prio -> clear; else set prio (single selection semantics are handled in setPriority)
-  try {
-    if (hasPriority(categoryKey, participantId)) clearPriorityCRDT(id.value, categoryKey, participantId)
-    else setPriorityCRDT(id.value, categoryKey, participantId)
-  } catch {}
+  if (hasPriority(categoryKey, participantId)) {
+    clearPriorityCRDT(id.value, categoryKey, participantId)
+    store.addLogEvent(id.value, 'unprio', categoryKey, participantId)
+  } else {
+    setPriorityCRDT(id.value, categoryKey, participantId)
+    store.addLogEvent(id.value, 'prio', categoryKey, participantId)
+  }
 }
 
 function short(pk: string) { return (pk || '').slice(0, 8) }

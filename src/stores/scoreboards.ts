@@ -7,7 +7,8 @@ import { useUserStore } from '@/stores/user'
 import { toast } from 'vue-sonner'
 import { useProfilesStore } from '@/stores/profiles'
 import { dbGetAll, dbBulkPut, dbDelete, dbPut } from '@/lib/idb'
-import { subscribeToBoardCRDT } from '@/nostrToCRDT'
+import { subscribeToBoardCRDT, appendLogEvent as appendLogEventCRDT } from '@/nostrToCRDT'
+import type { LogEntry as CRDTLogEntry } from '@/crdt'
 import shortId from '@/lib/utils'
 
 export interface Scoreboard {
@@ -210,7 +211,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
         editors: Array.isArray(items.value[idx].editors) ? items.value[idx].editors : [],
         snapshot: items.value[idx].snapshot,
         participants: Array.isArray(items.value[idx].participants) ? items.value[idx].participants : [],
-  secret: items.value[idx].secret,
+        secret: items.value[idx].secret,
       })
     } catch (e) {
       console.warn('[scoreboards] updateSnapshot failed', e)
@@ -582,6 +583,21 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     void ensureBoardPREPublished(boardId)
   }
 
+  // ---------- Events log helpers ----------
+  /** Append a log entry into CRDT snapshot.events and publish. Action: '+1' | '-1' | 'add-cat' | 'prio' | 'unprio' */
+  async function addLogEvent(boardId: string, action: '+1' | '-1' | 'add-cat' | 'prio' | 'unprio', categoryId: string, participantId?: string | null) {
+    const pub = useUserStore().getPubKey() || ''
+    const tsSec = Math.floor(nowUtc() / 1000)
+    const eid = shortId()
+    const entry: CRDTLogEntry = [eid, pub, tsSec, String(categoryId || ''), action, participantId == null ? null : String(participantId)]
+    // Append into CRDT snapshot.events and publish via CRDT channel so all editors can propagate
+    try {
+      appendLogEventCRDT(boardId, entry)
+    } catch (e) {
+      console.warn('[scoreboards] addLogEvent -> CRDT append failed', e)
+    }
+  }
+
   /**
    * Join a scoreboard by a code like "lik::<id>::<secret>".
    * - If the scoreboard is already in user's list and they are the author: show error toast.
@@ -684,7 +700,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
                 snapshot = null
               }
               const idx = items.value.findIndex((s) => s.id === id)
-              if (idx !== -1 && snapshot) items.value[idx].snapshot = snapshot
+              if (idx !== -1 && snapshot) await updateSnapshot(id, snapshot)
             } catch {}
           }
         }
@@ -729,5 +745,6 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     approve,
     reject,
     renameBoard,
+  addLogEvent,
   }
 })
