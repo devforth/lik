@@ -206,13 +206,13 @@
     <!-- Logs drawer -->
     <Drawer v-model:open="logsOpen">
       <DrawerContent>
-        <div class="mx-auto w-full max-w-md">
-          <DrawerHeader>
+        <div class="mx-auto w-full max-w-md max-h-[66vh] flex flex-col">
+          <DrawerHeader class="shrink-0">
             <DrawerTitle>Activity log</DrawerTitle>
             <DrawerDescription>Last edits</DrawerDescription>
           </DrawerHeader>
 
-          <div class="px-4 pb-4 space-y-3" v-if="logsOpen">
+          <div class="px-4 pb-4 space-y-3 flex-1 overflow-y-auto min-h-0" v-if="logsOpen">
             <div v-if="!logList.length" class="text-sm text-muted-foreground">No activity yet.</div>
             <div v-for="e in logList" :key="e[0]" class="flex items-start gap-3">
               <img :src="eAvatar(e[1])" class="h-8 w-8 rounded-md bg-muted object-cover" alt="avatar" />
@@ -236,7 +236,7 @@
             </div>
           </div>
 
-          <DrawerFooter>
+          <DrawerFooter class="shrink-0">
             <DrawerClose as-child>
               <Button variant="outline">Close</Button>
             </DrawerClose>
@@ -681,7 +681,12 @@ const members = computed(() => {
 })
 
 // Logs helpers (lazy render when drawer open) — from CRDT snapshot.events
-const logList = computed(() => (logsOpen.value ? ((scoreboard.value?.snapshot?.events || []) as [string, string, number, string, string, string | null][]) : []))
+// CRDT stores events sorted ascending by time; show newest first in UI
+const logList = computed(() => {
+  if (!logsOpen.value) return []
+  const list = (scoreboard.value?.snapshot?.events || []) as [string, string, number, string, string, string | null][]
+  return [...list].reverse()
+})
 function eName(pubkey: string): string {
   const p = profiles.get(pubkey)
   return p?.name || short(pubkey)
