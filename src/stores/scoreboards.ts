@@ -435,11 +435,15 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     }
     const sb = items.value.find((s) => s.id === boardId)
     if (!sb) return
-    const editors = Array.isArray(sb.editors) ? sb.editors : []
-    try {
-      const unsub = subscribeToBoardCRDT(boardId, editors)
-      crdtUnsubById.set(boardId, unsub)
-    } catch {}
+  // Use editors as-is; it includes the owner by convention
+    if (!Array.isArray(sb.editors)) {
+      throw new Error('Invalid editors array')
+    }
+    if (!sb.editors.length) {
+      throw new Error('Empty editors array')
+    }
+    const unsub = subscribeToBoardCRDT(boardId, sb.editors)
+    crdtUnsubById.set(boardId, unsub)
   }
 
   function unsubscribeBoardCRDT(boardId: string) {
@@ -670,7 +674,6 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
           const { event: crdtEvt } = await fetchLatestPREByDTag(crdtTag, allowedAuthors.length ? allowedAuthors : null)
           if (crdtEvt && typeof crdtEvt.content === 'string') {
             try {
-              // Snapshot now may be encrypted; attempt decryption with provided secret
               let snapshot: any = null
               try {
                 const { aesDecryptFromBase64 } = await import('@/lib/utils')

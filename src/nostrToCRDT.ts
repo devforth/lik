@@ -58,12 +58,15 @@ export function subscribeToBoardCRDT(boardId: string, pubkeys: string[]) {
   const me = useUserStore().getPubKey()
   if (!me) throw new Error('No pubkey available')
   // Ensure we always constrain by authors; if excluding self empties the list,
-  // fall back to including the provided pubkeys (which may include self) or self as last resort.
-  const raw = (Array.isArray(pubkeys) ? pubkeys : []).map(String).filter(Boolean)
-  let authors = raw.filter((p) => p !== me)
-  if (!authors.length) {
-    authors = raw.length ? raw : [me]
+  // prefer not to constrain by authors at all to avoid missing owner updates.
+  if (!Array.isArray(pubkeys)) {
+    throw new Error('Invalid pubkeys array')
   }
+  if (!pubkeys.length) {
+    throw new Error('Empty pubkeys array')
+  }
+  const authors = pubkeys.filter((p) => p !== me)
+  // If we don't know any other authors yet, don't set an authors filter
   const key = `crdt:${boardId}`
 
   if (active.has(key)) {
@@ -71,8 +74,9 @@ export function subscribeToBoardCRDT(boardId: string, pubkeys: string[]) {
     active.delete(key)
   }
 
-  const filters: Filter[] = [{ kinds: [KIND_PRE] as any, '#d': [tagD], authors } as any]
-
+  const baseFilter: any = { kinds: [KIND_PRE] as any, '#d': [tagD], authors }
+  const filters: Filter[] = [baseFilter]
+  console.info('[nostr] Subscribing to CRDT PRE', { boardId, authors, filters })
   const sub = pool.subscribeMany(RELAYS, filters as any, {
   onevent: async (evt: any) => {
     console.info('[nostr] PRE event CRDT', { evt })

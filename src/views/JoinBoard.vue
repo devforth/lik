@@ -99,7 +99,9 @@ function handleCode(code: string) {
   }
   // call join action
   void (async () => {
+    console.log('Joining board with code:', code)
     const res = await scoreboards.join(code)
+    console.log('Join response:', res)
     if (res.ok) {
       // Navigate directly to the joined board
       const id = res.boardId;

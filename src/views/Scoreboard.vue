@@ -460,7 +460,6 @@ import shortId from '@/lib/utils'
 import { 
   addCategory as addCategoryCRDT, 
   addScore as addScoreCRDT, 
-  subscribeToBoardCRDT, 
   editCat as editCatCRDT, 
   setPriority as setPriorityCRDT, clearPriority as clearPriorityCRDT 
 } from '@/nostrToCRDT'
@@ -719,15 +718,13 @@ watch(
         unsubBRD = () => store.unsubscribeBoardMeta(id.value)
       } catch {}
     }
-  // Subscribe to CRDT updates from all editors except self
+  // Subscribe to CRDT updates via store (includes owner + editors)
     if (unsubCRDT) { 
       try { unsubCRDT() } catch {}; 
       unsubCRDT = null 
     }
-  const members = Array.isArray(scoreboard.value.editors) ? scoreboard.value.editors : []
-    try { 
-      unsubCRDT = subscribeToBoardCRDT(id.value, members) 
-    } catch {}
+    store.subscribeBoardCRDT(id.value)
+    unsubCRDT = () => store.unsubscribeBoardCRDT(id.value)
   },
   { immediate: true, deep: true }
 )
