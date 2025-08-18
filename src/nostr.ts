@@ -26,6 +26,42 @@ const pool = new SimplePool()
 // Keep local refs to open subscriptions by key for optional housekeeping
 const activeSubs = new Map<string, { close: () => void }>()
 
+// Debounce configuration for publish calls
+export const RELAY_DEBOUNCE_SEC: number = Number((import.meta as any)?.env?.VITE_RELAY_DEBOUNCE_SEC ?? 0.5)
+const RELAY_DEBOUNCE_MS = Math.max(0, Math.floor(RELAY_DEBOUNCE_SEC * 1000))
+
+type SendArgs = {
+  pubkeyHex: string
+  privkeyHex: string
+  kind: number
+  content: string
+  tags: string[][]
+  originalContentForDbg: any
+  relays: string[]
+}
+
+type DebounceEntry = {
+  timeout: ReturnType<typeof setTimeout>
+  resolvers: Array<(v: void) => void>
+}
+
+const sendDebounceMap = new Map<string, DebounceEntry>()
+
+function serializeTags(tags: string[][] = []): string {
+  // Join inner arrays by unit-separator and outer by record-separator to avoid collisions
+  try {
+    if (!Array.isArray(tags)) return ''
+    return tags.map(t => (Array.isArray(t) ? t.join('\u001F') : String(t))).join('\u001E')
+  } catch {
+    // Fallback to JSON
+    try { return JSON.stringify(tags) } catch { return '' }
+  }
+}
+
+function sendKey(kind: number, tags: string[][] = []): string {
+  return `${Number(kind)}|${serializeTags(tags)}`
+}
+
 /**
  * Subscribe to events by hashtag/tag using Nostr's #t filter.
  * Defaults to all kinds; most join requests are kind 1 notes. Consumers can filter in callback.
@@ -185,25 +221,70 @@ export async function send(
   originalContentForDbg: any = {},
   relays: string[] = RELAYS,
 ) {
-  try {
-    const evt: EventTemplate = {
-      kind: Number(kind),
-      created_at: Math.floor(Date.now() / 1000),
-      tags: Array.isArray(tags) ? tags : [],
-      content: String(content ?? ''),
+  const key = sendKey(kind, tags)
+  const latestArgs: SendArgs = { pubkeyHex, privkeyHex, kind, content, tags, originalContentForDbg, relays }
+
+  // Inner function that actually performs the publish
+  const doPublish = (args: SendArgs) => {
+    try {
+      const evt: EventTemplate = {
+        kind: Number(args.kind),
+        created_at: Math.floor(Date.now() / 1000),
+        tags: Array.isArray(args.tags) ? args.tags : [],
+        content: String(args.content ?? ''),
+      }
+      console.info(`[nostr] sending event k:${args.kind}, t:${serializeTags(args.tags)}`, { pubkeyHex: args.pubkeyHex, kind: args.kind, content: args.content, tags: args.tags, relays: args.relays, originalContentForDbg: args.originalContentForDbg })
+      const sk = hexToBytes(String(args.privkeyHex))
+      const rels = args.relays && args.relays.length ? args.relays : RELAYS
+      const signed = finalizeEvent({ ...evt }, sk)
+      const pubs = toPromises(pool.publish(rels, signed) as any)
+      // Fire-and-forget: log failures but don't block UI
+      for (const p of pubs) {
+        p.catch((e: any) => console.warn('[nostr] publish error:', e?.message ?? e))
+      }
+    } catch (e) {
+      console.warn('[nostr] send failed', e)
     }
-    console.info('[nostr] sending event', { pubkeyHex, kind, content, tags, relays, originalContentForDbg})
-    const sk = hexToBytes(String(privkeyHex))
-    const rels = relays && relays.length ? relays : RELAYS
-    const signed = finalizeEvent({ ...evt }, sk)
-    const pubs = toPromises(pool.publish(rels, signed) as any)
-   // Fire-and-forget: log failures but don't block UI
-    for (const p of pubs) {
-      p.catch((e: any) => console.warn('[nostr] publish error:', e?.message ?? e))
-    }
-  } catch (e) {
-    console.warn('[nostr] send failed', e)
   }
+
+  // Return a promise that resolves when the debounced publish fires
+  return new Promise<void>((resolve) => {
+    const existing = sendDebounceMap.get(key)
+    if (existing) {
+      console.log(`[nostr] 🐢 canceling on key ${key}`);
+      clearTimeout(existing.timeout)
+      existing.resolvers.push(resolve)
+      existing.timeout = setTimeout(() => {
+        const entry = sendDebounceMap.get(key)
+        if (!entry) return
+        try {
+          doPublish(latestArgs)
+        } finally {
+          sendDebounceMap.delete(key)
+          for (const res of entry.resolvers) {
+            res()
+          }
+        }
+      }, RELAY_DEBOUNCE_MS)
+    } else {
+      console.log(`[nostr] 🐢 add postpone call ${key}`);
+
+      const timeout = setTimeout(() => {
+        const entry = sendDebounceMap.get(key)
+        if (!entry) return
+        try {
+          doPublish(latestArgs)
+        } finally {
+          sendDebounceMap.delete(key)
+          for (const res of entry.resolvers) res()
+        }
+      }, RELAY_DEBOUNCE_MS)
+      sendDebounceMap.set(key, {
+        timeout,
+        resolvers: [resolve],
+      })
+    }
+  })
 }
 
 // PRE kind constant (parameterized replaceable event)
