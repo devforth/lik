@@ -128,8 +128,10 @@
                       <Button
                         variant="outline"
                         size="icon"
-                        class="h-5 w-5"
-                        :class="{ 'bg-primary text-primary-foreground border-primary': hasPriority(cat.key, p.id) }"
+                        class="h-5 w-5 focus-visible:ring-0 focus-visible:ring-transparent focus-visible:border-inherit hover:transition-none"
+                        :class="hasPriority(cat.key, p.id)
+                          ? 'bg-primary text-primary-foreground border-primary hover:bg-primary hover:text-primary-foreground dark:bg-primary/30 dark:text-white dark:border-primary/40 dark:hover:bg-primary/40 dark:hover:text-white'
+                          : ''"
                         :disabled="!canEdit"
                         @click="togglePriority(cat.key, p.id)"
                         aria-label="Toggle priority"
