@@ -31,16 +31,24 @@
                 This key unlocks your account and the scoreboards you created. Save it somewhere safe. If you clear the app cache or lose your phone, you'll need this key to restore everything. Please make a backup now to avoid losing data.
               </DrawerDescription>
             </DrawerHeader>
-            <div class="space-y-2">
-              <label class="text-sm text-muted-foreground">Secret key</label>
-              <div class="flex gap-2">
-                <input :value="nsec" readonly class="font-mono file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 flex-1 min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm" />
-                <Button size="sm" @click="copyNsec">Copy</Button>
+            <div class="space-y-3">
+              <Button variant="outline" @click="mpReveal = true" :disabled="mpReveal" class="w-full justify-start">
+                Show my secret code
+              </Button>
+              <div v-if="mpReveal" class="space-y-2">
+                <label class="text-sm text-muted-foreground">Secret key</label>
+                <div class="flex gap-2">
+                  <input :value="nsec" readonly class="font-mono file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input flex h-9 flex-1 min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm" />
+                  <Button size="sm" @click="copyNsec">Copy</Button>
+                </div>
               </div>
             </div>
-            <DrawerFooter class="p-0">
+            <DrawerFooter class="p-0 flex gap-2 flex-col sm:flex-row">
               <DrawerClose as-child>
-                <Button variant="outline">Close</Button>
+                <Button class="flex-1" :disabled="!mpReveal" @click="markBackupWritten">I wrote down my code</Button>
+              </DrawerClose>
+              <DrawerClose as-child>
+                <Button variant="outline" class="flex-1" @click="remindLater">Remind me later</Button>
               </DrawerClose>
             </DrawerFooter>
           </div>
@@ -92,6 +100,7 @@ import { dbClearAll, dbPut } from '@/lib/idb'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { fetchLatestProfile, fetchLatestPREByDTag, RELAYS } from '@/nostr'
 import { toast } from 'vue-sonner'
+import { useBackupReminderStore } from '@/stores/backupReminder'
 
 const userStore = useUserStore()
 const sbStore = useScoreboardsStore()
@@ -129,6 +138,12 @@ async function copyNsec() {
 const importNsec = ref('')
 const importError = ref('')
 const busy = ref(false)
+
+// MyProfile backup drawer gated reveal
+const mpReveal = ref(false)
+const backupStore = useBackupReminderStore()
+function markBackupWritten() { backupStore.markWritten() }
+function remindLater() { backupStore.remindLater() }
 
 async function onImport() {
   importError.value = ''
@@ -257,7 +272,7 @@ async function onImport() {
     }
 
     // Persist and resubscribe
-  await sbStore.ensureLoaded()
+    await sbStore.ensureLoaded()
     // saveAll is internal; rely on watcher by making a small mutation
     // Alternatively, call a private function via updateSnapshot or add method
     // Trigger CRDT subscriptions for recovered boards

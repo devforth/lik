@@ -515,6 +515,7 @@ import {
   setPriority as setPriorityCRDT, clearPriority as clearPriorityCRDT, setOrder as setOrderCRDT 
 } from '@/nostrToCRDT'
 import { Capacitor } from '@capacitor/core'
+import { useBackupReminderStore } from '@/stores/backupReminder'
 
 const route = useRoute()
 const router = useRouter()
@@ -746,6 +747,13 @@ function scoreFor(cat: any, participantId: string): number {
 function changeScore(categoryKey: string, participantId: string, delta: -1 | 1) {
   if (!id.value) return
   addScoreCRDT(id.value, categoryKey, participantId, delta)
+  // After a score change, consider prompting backup reminder
+  try {
+    const brd = scoreboard.value
+    const createdAt = (brd && typeof brd.createdAt === 'number') ? brd.createdAt : null
+    const backup = useBackupReminderStore()
+    backup.promptIfNeeded(createdAt)
+  } catch {}
 }
 
 // Priority helpers

@@ -5,7 +5,7 @@ import { ref } from 'vue'
 
 type Pref = 'light' | 'dark' | null
 
-const STORAGE_KEY = 'lik.theme'
+const STORAGE_KEY = 'lik:theme'
 const isDark = ref(false)
 const userPref = ref<Pref>(null)
 let mql: MediaQueryList | null = null

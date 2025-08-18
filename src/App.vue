@@ -89,7 +89,8 @@
             <span class="text-sm font-medium">Offline</span>
           </div>
         </div>
-        <RouterView />
+  <RouterView />
+  <BackupReminder />
         <Toaster class="pointer-events-auto" />
       </main>
     </SidebarProvider>
@@ -114,6 +115,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ChevronUp, WifiOff, Moon, Sun } from 'lucide-vue-next'
 import { Switch } from '@/components/ui/switch'
 import { useTheme } from './theme'
+import BackupReminder from '@/components/BackupReminder.vue'
 
 
 const scoreboardsStore = useScoreboardsStore()
