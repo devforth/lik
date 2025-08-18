@@ -512,6 +512,7 @@ import {
   editCat as editCatCRDT, 
   setPriority as setPriorityCRDT, clearPriority as clearPriorityCRDT, setOrder as setOrderCRDT 
 } from '@/nostrToCRDT'
+import { Capacitor } from '@capacitor/core'
 
 const route = useRoute()
 const router = useRouter()
@@ -826,23 +827,49 @@ function subscribeBoardCRDT() {
   unsubCRDT = () => store.unsubscribeBoardCRDT(id.value)
 }
 
+// Keep references for cleanup
+let capRemove: undefined | (() => void)
+let onVis: undefined | (() => void)
+
 onMounted(() => {
   subscribeBoardMetaIfNeeded()
   subscribeBoardCRDT()
   // Resubscribe CRDT on network reconnect to refresh state
   window.addEventListener('online', subscribeBoardCRDT)
+  // Handle resume from background (Capacitor) and web visibility change
+  const onBecameActive = () => {
+    // Always resubscribe CRDT
+    subscribeBoardCRDT()
+    // If not owner, also (re)subscribe to board metadata channel
+    if (!isOwner.value) subscribeBoardMetaIfNeeded()
+  }
+  // Web fallback
+  onVis = () => { if (document.visibilityState === 'visible') onBecameActive() }
+  document.addEventListener('visibilitychange', onVis)
+  // Capacitor app state
+  ;(async () => {
+    try {
+      if (Capacitor?.isNativePlatform?.()) {
+  const capApp = '@capacitor/app'
+  const { App } = await import(/* @vite-ignore */ capApp as any)
+  const listener = await App.addListener('appStateChange', ({ isActive }: { isActive: boolean }) => {
+          if (isActive) onBecameActive()
+        })
+        capRemove = () => { try { listener.remove() } catch {} }
+      }
+    } catch {}
+  })()
 })
 
 onBeforeUnmount(() => {
   if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
   if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
   window.removeEventListener('online', subscribeBoardCRDT)
+  if (onVis) document.removeEventListener('visibilitychange', onVis)
+  if (capRemove) { try { capRemove() } catch {} }
 })
 
-onBeforeUnmount(() => {
-  if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
-  if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
-})
+// (duplicate onBeforeUnmount removed)
 
 // Autofocus the category input when the drawer opens
 watch(createOpen, (open) => {
