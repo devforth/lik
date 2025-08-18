@@ -102,6 +102,9 @@
                         <DropdownMenuItem @click="openRenameCategory(cat.key, cat.value.name || '')">
                           <span>Rename</span>
                         </DropdownMenuItem>
+                        <DropdownMenuItem :disabled="!canMoveCategoryUp(cat.key)" @click="moveCategoryUp(cat.key)">
+                          <span>Move category up</span>
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -507,7 +510,7 @@ import {
   addCategory as addCategoryCRDT, 
   addScore as addScoreCRDT, 
   editCat as editCatCRDT, 
-  setPriority as setPriorityCRDT, clearPriority as clearPriorityCRDT 
+  setPriority as setPriorityCRDT, clearPriority as clearPriorityCRDT, setOrder as setOrderCRDT 
 } from '@/nostrToCRDT'
 
 const route = useRoute()
@@ -715,7 +718,7 @@ function relTime(tsSec: number): string {
   return `${Math.floor(d/86400)}d ago`
 }
 
-// Categories from snapshot, sorted by order then name, visible only, excluding ::prio shadow categories
+// Categories from snapshot, sorted by order desc (higher first) then name, visible only, excluding ::prio shadow categories
 const categoriesList = computed(() => {
   const cats = (scoreboard.value?.snapshot?.categories || {}) as Record<string, any>
   return Object.entries(cats)
@@ -724,7 +727,7 @@ const categoriesList = computed(() => {
     .sort((a, b) => {
       const ao = Number(a.value?.order ?? 0)
       const bo = Number(b.value?.order ?? 0)
-      if (ao !== bo) return ao - bo
+  if (ao !== bo) return bo - ao
       const an = String(a.value?.name || '')
       const bn = String(b.value?.name || '')
       return an.localeCompare(bn)
@@ -751,13 +754,7 @@ function hasPriority(categoryKey: string, participantId: string): boolean {
   const n = Number((prioCat?.state?.N || {})[participantId] || 0)
   return p - n > 0
 }
-function prioScoreFor(categoryKey: string, participantId: string): number {
-  const prioCat = scoreboard.value?.snapshot?.categories?.[prioKeyFor(categoryKey)]
-  if (!prioCat) return 0
-  const p = Number((prioCat?.state?.P || {})[participantId] || 0)
-  const n = Number((prioCat?.state?.N || {})[participantId] || 0)
-  return p - n
-}
+
 function togglePriority(categoryKey: string, participantId: string) {
   if (!id.value) return
   // Toggle: if already has prio -> clear; else set prio (single selection semantics are handled in setPriority)
@@ -766,6 +763,37 @@ function togglePriority(categoryKey: string, participantId: string) {
   } else {
     setPriorityCRDT(id.value, categoryKey, participantId)
   }
+}
+
+// Category ordering helpers
+function canMoveCategoryUp(categoryKey: string): boolean {
+  const list = categoriesList.value
+  const idx = list.findIndex((c) => c.key === categoryKey)
+  // Higher order categories are at top (lower index). Can move up if there's an item above.
+  return idx > 0
+}
+
+function moveCategoryUp(categoryKey: string) {
+  if (!id.value) return
+  const list = categoriesList.value
+  const idx = list.findIndex((c) => c.key === categoryKey)
+  if (idx <= 0) return // nothing above or not found
+  const above = list[idx - 1]
+  const current = list[idx]
+  const aboveOrder = Number(above.value?.order ?? 0)
+  const curOrder = Number(current.value?.order ?? 0)
+  // Find the next after above (two above current)
+  const twoAbove = idx - 2 >= 0 ? list[idx - 2] : null
+  if (!twoAbove) {
+    // Only one category exists with higher order -> set its order + 1
+    const newOrder = aboveOrder + 1
+    setOrderCRDT(id.value, categoryKey, newOrder)
+    return
+  }
+  const twoAboveOrder = Number(twoAbove.value?.order ?? 0)
+  // Set to average between above and twoAbove: order = above + (twoAbove - above)/2
+  const newOrder = aboveOrder + (twoAboveOrder - aboveOrder) / 2
+  setOrderCRDT(id.value, categoryKey, newOrder)
 }
 
 function short(pk: string) { return (pk || '').slice(0, 8) }

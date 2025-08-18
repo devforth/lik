@@ -183,12 +183,20 @@ export function addCategory(boardId: string, id: string, name: string): EndingSt
   const board = store.items.find((s) => s.id === boardId)
   if (!board) return null
 
-  // Build a minimal delta state by performing rename (which ensures the category)
+  // Determine the current max order among visible, non-shadow categories
+  const cats = ((board.snapshot as any)?.categories || {}) as Record<string, any>
+  const maxOrder = Object.entries(cats)
+    .filter(([key, val]) => !String(key).endsWith('::prio') && (val?.vis ?? 1) === 1)
+    .reduce((acc, [, val]) => Math.max(acc, Number(val?.order ?? 0)), 0)
+  const nextOrder = (Number.isFinite(maxOrder) ? maxOrder : 0) + 1
+
+  // Build a minimal delta state by performing rename (which ensures the category) and setting its order to top
   const deltaCrdt = new ScoreboardCRDT(me)
   const afterRename = deltaCrdt.renameCategory(id, name)
+  const afterOrder = new ScoreboardCRDT(me, afterRename).setOrder(id, nextOrder)
   // Also ensure a priority shadow category for this category, unnamed and hidden in UI by key suffix
   const prioKey = `${id}::prio`
-  const afterPrio = new ScoreboardCRDT(me, afterRename).renameCategory(prioKey, '')
+  const afterPrio = new ScoreboardCRDT(me, afterOrder).renameCategory(prioKey, '')
 
   // Merge delta into current snapshot
   const baseCrdt = new ScoreboardCRDT(me, board.snapshot || undefined)
@@ -200,6 +208,28 @@ export function addCategory(boardId: string, id: string, name: string): EndingSt
   // Publish PRE snapshot for others to merge
   void publishSnapshot(boardId, withLog)
   return withLog
+}
+
+/**
+ * Set category order (number, higher shows on top). Persist and publish snapshot.
+ */
+export function setOrder(boardId: string, categoryKey: string, order: number): EndingState | null {
+  const store = useScoreboardsStore()
+  const me = useUserStore().getPubKey()
+  if (!me) throw new Error('No pubkey available')
+  if (!isEditor(boardId, me)) {
+    throw new Error('Not authorized to set order - insufficient permissions')
+  }
+  const board = store.items.find((s) => s.id === boardId)
+  if (!board) return null
+
+  const delta = new ScoreboardCRDT(me)
+  const after = delta.setOrder(categoryKey, Number(order))
+  const base = new ScoreboardCRDT(me, board.snapshot || undefined)
+  const merged = base.merge(after)
+  void store.updateSnapshot(boardId, merged)
+  void publishSnapshot(boardId, merged)
+  return merged
 }
 
 /**
@@ -366,4 +396,4 @@ export function appendLogEvent(boardId: string, entry: LogEntry): EndingState | 
   return next
 }
 
-export default { subscribeToBoardCRDT, addScore, addCategory, editCat, removeParticipantData, setPriority, clearPriority, appendLogEvent }
+export default { subscribeToBoardCRDT, addScore, addCategory, editCat, removeParticipantData, setPriority, clearPriority, appendLogEvent, setOrder }
