@@ -1,5 +1,39 @@
 apply plugin: 'com.android.application'
 
+// Derive versionName/versionCode automatically with overrides
+def readPackageJsonVersion = {
+    try {
+        // package.json is at project root; rootProject.projectDir points to /android
+        def pkgFile = new File(rootProject.projectDir, '../package.json')
+        if (pkgFile.exists()) {
+            def text = pkgFile.getText('UTF-8')
+            def m = (text =~ /"version"\s*:\s*"([^"]+)"/)
+            if (m.find()) {
+                return (m.group(1) as String)
+            }
+        }
+    } catch (ignored) {}
+    return null
+}
+
+def computeVersionCode = { String v ->
+    try {
+        def m = (v =~ /(\d+)\.(\d+)\.(\d+)/)
+        if (m.find()) {
+            int major = m.group(1) as int
+            int minor = m.group(2) as int
+            int patch = m.group(3) as int
+            int code = major * 10000 + minor * 100 + patch
+            return Math.max(code, 1)
+        }
+    } catch (ignored) {}
+    return 1
+}
+
+// Single source of truth: package.json version; fallback to 1.0.0
+def resolvedVersionName = (readPackageJsonVersion() ?: '1.0.0')
+def versionCodeInt = computeVersionCode(resolvedVersionName) as int
+
 android {
     namespace "io.devforth.lik"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +41,8 @@ android {
         applicationId "io.devforth.lik"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0.1"
+        versionCode versionCodeInt
+        versionName resolvedVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -53,4 +87,15 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// Print the app version once per build when assembling/bundling release
+tasks.register("printAppVersion") {
+    doLast {
+        logger.lifecycle("Building Android app: applicationId=io.devforth.lik, versionName=${resolvedVersionName}, versionCode=${versionCodeInt}")
+    }
+}
+
+tasks.matching { it.name in ['assembleRelease', 'bundleRelease'] }.configureEach {
+    dependsOn("printAppVersion")
 }

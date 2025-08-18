@@ -25,6 +25,7 @@ ENV PATH="$JAVA_HOME/bin:${PATH}"
 # Copy android/ and node_modules from previous stage
 COPY --from=web /workspace/android ./android
 COPY --from=web /workspace/node_modules ./node_modules
+COPY --from=web /workspace/package.json ./package.json
 
 # Required SDK components (adjust versions if different in your project)
 RUN yes | sdkmanager "platforms;android-35" "platform-tools" "build-tools;35.0.0" "cmdline-tools;latest" || true
