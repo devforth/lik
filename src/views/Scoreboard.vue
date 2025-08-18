@@ -829,11 +829,14 @@ function subscribeBoardCRDT() {
 onMounted(() => {
   subscribeBoardMetaIfNeeded()
   subscribeBoardCRDT()
+  // Resubscribe CRDT on network reconnect to refresh state
+  window.addEventListener('online', subscribeBoardCRDT)
 })
 
 onBeforeUnmount(() => {
   if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
   if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
+  window.removeEventListener('online', subscribeBoardCRDT)
 })
 
 onBeforeUnmount(() => {

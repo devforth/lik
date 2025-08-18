@@ -65,9 +65,14 @@
         </SidebarFooter>
       </Sidebar>
       <main class="w-full">
-        <SidebarTrigger />
+        <div class="flex items-center gap-2 p-2">
+          <SidebarTrigger />
+          <div v-if="!isOnline" class="flex items-center gap-1 text-red-500 select-none">
+            <WifiOff class="h-5 w-5" />
+            <span class="text-sm font-medium">Offline</span>
+          </div>
+        </div>
         <RouterView />
-  <!-- Sonner toaster -->
         <Toaster class="pointer-events-auto" />
       </main>
     </SidebarProvider>
@@ -88,8 +93,8 @@ import { useScoreboardsStore } from '@/stores/scoreboards'
 import { useUserStore } from '@/stores/user'
 import { Toaster } from '@/components/ui/sonner'
 import 'vue-sonner/style.css'
-import { computed } from 'vue'
-import { ChevronUp } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { ChevronUp, WifiOff } from 'lucide-vue-next'
 
 
 const scoreboardsStore = useScoreboardsStore()
@@ -117,4 +122,19 @@ function joinBoard() {
 function goProfile() {
   router.push({ name: 'my-profile' })
 }
+
+// Network status indicator
+const isOnline = ref(typeof navigator !== 'undefined' ? navigator.onLine : true)
+const handleOnline = () => { isOnline.value = true }
+const handleOffline = () => { isOnline.value = false }
+
+onMounted(() => {
+  window.addEventListener('online', handleOnline)
+  window.addEventListener('offline', handleOffline)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('online', handleOnline)
+  window.removeEventListener('offline', handleOffline)
+})
 </script>
