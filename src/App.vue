@@ -42,6 +42,22 @@
         <SidebarFooter>
           <SidebarMenu>
             <SidebarMenuItem>
+              <SidebarMenuButton class="text-xs px-0 justify-between">
+                <span>Dark mode</span>
+
+                 <SidebarMenuAction as-child>
+                  <Switch :model-value="isDark" @update:model-value="toggleTheme">
+                    <template #thumb>
+                      <Moon v-if="isDark" class="size-3" />
+                      <Sun v-else class="size-3" />
+                    </template>
+                  </Switch>
+                </SidebarMenuAction>
+              </SidebarMenuButton>
+             
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
               <DropdownMenu>
                 <DropdownMenuTrigger class="pl-0 pr-0" asChild>
                   <SidebarMenuButton>
@@ -61,6 +77,7 @@
                 </DropdownMenuContent>
               </DropdownMenu>
             </SidebarMenuItem>
+
           </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
@@ -94,7 +111,9 @@ import { useUserStore } from '@/stores/user'
 import { Toaster } from '@/components/ui/sonner'
 import 'vue-sonner/style.css'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ChevronUp, WifiOff } from 'lucide-vue-next'
+import { ChevronUp, WifiOff, Moon, Sun } from 'lucide-vue-next'
+import { Switch } from '@/components/ui/switch'
+import { useTheme } from './theme'
 
 
 const scoreboardsStore = useScoreboardsStore()
@@ -137,4 +156,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('online', handleOnline)
   window.removeEventListener('offline', handleOffline)
 })
+
+// Theme
+const { isDark, toggleTheme } = useTheme()
 </script>

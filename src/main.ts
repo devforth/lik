@@ -7,6 +7,7 @@ import router from './router'
 
 import '@/styles.css'
 import { initScale } from './ui-scale'
+import { initTheme } from './theme'
 import { useUserStore } from './stores/user'
 import { useScoreboardsStore } from './stores/scoreboards'
 
@@ -17,6 +18,8 @@ app.use(router)
 
 // Initialize UI scaling early
 initScale()
+// Initialize theme (respects OS and persisted user preference)
+initTheme()
 
 // Initialize user profile (the store will publish to Nostr on create/changes)
 const userStore = useUserStore()

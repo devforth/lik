@@ -21,7 +21,7 @@
     "@dicebear/collection": "^9.2.3",
     "@dicebear/core": "^9.2.3",
     "@tailwindcss/vite": "^4.1.11",
-    "@vueuse/core": "^13.6.0",
+    "@vueuse/core": "^13.7.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "konsta": "^4.0.1",
