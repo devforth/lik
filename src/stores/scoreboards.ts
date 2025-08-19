@@ -434,8 +434,10 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   // CRDT subscriptions management
   function subscribeBoardCRDT(boardId: string) {
     const sb = items.value.find((s) => s.id === boardId)
-    if (!sb) return
-  // Use editors as-is; it includes the owner by convention
+    if (!sb) {
+      throw new Error(`Scoreboard with id ${boardId} not found`)
+    }
+    // Use editors as-is; it includes the owner by convention
     if (!Array.isArray(sb.editors)) {
       throw new Error('Invalid editors array')
     }

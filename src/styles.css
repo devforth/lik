@@ -86,11 +86,11 @@
 
 .dark {
   /* Slightly lighter background for better comfort */
-  --background: oklch(23.544% 0.00192 286.051 / 0.861);
+  --background: oklch(28.925% 0.01816 285.192 / 0.861);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.18 0 0);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.18 0 0);
+  --popover: oklch(27.099% 0.01488 279.719);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.985 0 0);
   --primary-foreground: oklch(0.205 0 0);
@@ -102,7 +102,7 @@
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.396 0.141 25.723);
   --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
+  --border: oklch(34.271% 0.00278 16.522);
   --input: oklch(0.269 0 0);
   --ring: oklch(0.439 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
@@ -110,7 +110,7 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(28.228% 0.01478 296.841);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -131,4 +131,18 @@
   /* Base scale for the whole UI. All rem-based sizes will scale with this. */
   :root { --ui-scale: 1; }
   html { font-size: calc(16px * var(--ui-scale)); }
+}
+
+/* Sonner (toast) readability tweaks */
+/* Ensure toast text is sufficiently bright on dark theme */
+.dark .toaster [data-sonner-toast] {
+  color: var(--popover-foreground);
+}
+.dark .toaster [data-title] {
+  color: var(--popover-foreground);
+}
+.dark .toaster [data-description] {
+  /* Slightly dimmer than title but still high-contrast */
+  color: oklch(0.92 0 0);
+  opacity: 0.95;
 }

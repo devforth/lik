@@ -150,147 +150,17 @@
 
 
 
-    <!-- Confirm delete drawer -->
-    <Drawer v-model:open="drawerOpen">
-      <DrawerContent>
-        <div class="mx-auto w-full max-w-sm">
-          <DrawerHeader>
-            <DrawerTitle>Delete scoreboard?</DrawerTitle>
-            <DrawerDescription>
-              Are you sure you want to delete this scoreboard? If it exists for other editors, they have to delete it by themselves.
-            </DrawerDescription>
-          </DrawerHeader>
-          <DrawerFooter>
-            <Button variant="destructive" @click="confirmDelete">Yes, delete</Button>
-            <DrawerClose as-child>
-              <Button variant="outline">No, keep</Button>
-            </DrawerClose>
-          </DrawerFooter>
-        </div>
-      </DrawerContent>
-    </Drawer>
+  <!-- Confirm delete drawer -->
+  <ConfirmDeleteBoard v-model:open="drawerOpen" @confirm="confirmDelete" />
 
-    <!-- Invite drawer -->
-    <Drawer v-model:open="inviteOpen">
-      <DrawerContent>
-        <div class="mx-auto w-full max-w-sm">
-          <DrawerHeader>
-            <DrawerTitle>Invite to scoreboard</DrawerTitle>
-            <DrawerDescription>
-              Let your teammate scan the QR code or copy the board ID and share it.
-            </DrawerDescription>
-          </DrawerHeader>
+  <!-- Invite drawer -->
+  <Invite v-model:open="inviteOpen" :board-id="boardId" :copied="copied" @copy="copyBoardId" />
 
-          <div class="px-4 pb-2 flex flex-col items-center gap-4">
-            <QrcodeVue :value="boardId" :size="192" level="M" class="rounded-md border p-2 bg-card" />
+  <!-- Logs drawer -->
+  <Logs v-model:open="logsOpen" :log-list="logList" :e-name="eName" :e-avatar="eAvatar" :rel-time="relTime" :participant-name="participantName" :category-name="categoryName" />
 
-            <div class="w-full flex items-center gap-2">
-              <Input :model-value="boardId" readonly class="font-mono text-sm" />
-              <Button variant="outline" size="icon" @click="copyBoardId" :aria-label="copied ? 'Copied' : 'Copy'">
-                <component :is="copied ? Check : Copy" class="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div class="w-full text-left text-sm text-muted-foreground">
-              Ask the invited user to open the LIK app, tap "Join to scoreboard" in the sidebar, then scan this QR code or paste the code above.
-            </div>
-            <div class="w-full text-left text-xs text-muted-foreground">
-              Note: scanning grants read-only access. You'll get a popup to approve editing rights.
-            </div>
-          </div>
-
-          <DrawerFooter>
-            <DrawerClose as-child>
-              <Button variant="outline">Close</Button>
-            </DrawerClose>
-          </DrawerFooter>
-        </div>
-      </DrawerContent>
-    </Drawer>
-
-    <!-- Logs drawer -->
-    <Drawer v-model:open="logsOpen">
-      <DrawerContent>
-        <div class="mx-auto w-full max-w-md max-h-[66vh] flex flex-col">
-          <DrawerHeader class="shrink-0">
-            <DrawerTitle>Activity log</DrawerTitle>
-            <DrawerDescription>Last edits</DrawerDescription>
-          </DrawerHeader>
-
-          <div class="px-4 pb-4 space-y-3 flex-1 overflow-y-auto min-h-0" v-if="logsOpen">
-            <div v-if="!logList.length" class="text-sm text-muted-foreground">No activity yet.</div>
-            <div v-for="e in logList" :key="e[0]" class="flex items-start gap-3">
-              <img :src="eAvatar(e[1])" class="h-8 w-8 rounded-md bg-muted object-cover" alt="avatar" />
-              <div class="min-w-0 flex-1">
-                <div class="text-sm font-medium truncate">{{ eName(e[1]) }}</div>
-                <div class="text-xs text-muted-foreground">{{ relTime(e[2]) }}</div>
-                <div class="text-sm mt-1">
-                  <span v-if="e[4] === '+1'">+1</span>
-                  <span v-else-if="e[4] === '-1'">-1</span>
-                  <span v-else-if="e[4] === 'add-cat'">Added category</span>
-                  <span v-else-if="e[4] === 'prio'">Star</span>
-                  <span v-else-if="e[4] === 'unprio'">Unstar</span>
-                  <template v-if="e[5]">
-                    <span class="text-muted-foreground"> for </span>
-                    <span>{{ participantName(e[5] || '') }}</span>
-                  </template>
-                  <span class="text-muted-foreground"> in </span>
-                  <span>"{{ categoryName(e[3]) }}"</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <DrawerFooter class="shrink-0">
-            <DrawerClose as-child>
-              <Button variant="outline">Close</Button>
-            </DrawerClose>
-          </DrawerFooter>
-        </div>
-      </DrawerContent>
-    </Drawer>
-
-    <!-- Settings drawer: owner and members list -->
-    <Drawer v-model:open="settingsOpen">
-      <DrawerContent>
-        <div class="mx-auto w-full max-w-md">
-          <DrawerHeader>
-            <DrawerTitle>Scoreboard settings</DrawerTitle>
-            <DrawerDescription>Owner and editors</DrawerDescription>
-          </DrawerHeader>
-
-          <div class="px-4 pb-4 space-y-6">
-            <div>
-              <div class="text-xs text-muted-foreground mb-2">Owner</div>
-              <div v-if="ownerProfile" class="flex items-center gap-3">
-                <img :src="ownerProfile.picture || ''" class="h-9 w-9 rounded-md bg-muted object-cover" alt="owner" />
-                <div class="text-sm font-medium">{{ ownerProfile.name || short(ownerProfile.pubkey) }}</div>
-              </div>
-              <div v-else class="text-sm text-muted-foreground">Unknown</div>
-            </div>
-
-            <div>
-              <div class="text-xs text-muted-foreground mb-2">Editors ({{ members.length }})</div>
-              <div v-if="members.length" class="space-y-2">
-                <div v-for="m in members" :key="m.pubkey" class="flex items-center gap-3">
-                  <img :src="m.picture || ''" class="h-8 w-8 rounded-md bg-muted object-cover" alt="avatar" />
-                  <div class="min-w-0">
-                    <div class="text-sm truncate">{{ m.name || short(m.pubkey) }}</div>
-                  </div>
-                </div>
-              </div>
-              <div v-else class="text-sm text-muted-foreground">No editors yet</div>
-            </div>
-          </div>
-
-          <DrawerFooter>
-            <DrawerClose as-child>
-              <Button variant="outline">Close</Button>
-            </DrawerClose>
-          </DrawerFooter>
-        </div>
-      </DrawerContent>
-    </Drawer>
+  <!-- Settings drawer: owner and members list -->
+  <SettingsDrawer v-model:open="settingsOpen" :owner-profile="ownerProfile" :members="members" :short="short" />
 
     <!-- Owner: last 3 join requests -->
     <div v-if="isOwner && myRequests.length" class="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur border-t p-3">
@@ -360,124 +230,19 @@
   </div>
 
   <!-- Create category drawer -->
-  <Drawer v-model:open="createOpen">
-    <DrawerContent>
-      <div class="mx-auto w-full max-w-sm">
-        <DrawerHeader>
-          <DrawerTitle>New category</DrawerTitle>
-          <DrawerDescription>Enter a name and create a category.</DrawerDescription>
-        </DrawerHeader>
-
-        <form class="px-4 pb-2 space-y-4" @submit.prevent="createCategory">
-          <div class="space-y-2">
-            <label class="text-sm" for="category-name">Category name</label>
-            <Input id="category-name" v-model="newCategoryName" placeholder="e.g., Bugs fixed" ref="createInputRef" />
-          </div>
-        </form>
-
-        <DrawerFooter>
-          <Button :disabled="!newCategoryName.trim()" @click="createCategory">Create</Button>
-          <DrawerClose as-child>
-            <Button variant="outline">Cancel</Button>
-          </DrawerClose>
-        </DrawerFooter>
-      </div>
-    </DrawerContent>
-  </Drawer>
+  <CreateCategory v-model:open="createOpen" @create="onCreateCategory" />
 
   <!-- Rename category drawer -->
-  <Drawer v-model:open="renameOpen">
-    <DrawerContent>
-      <div class="mx-auto w-full max-w-sm">
-        <DrawerHeader>
-          <DrawerTitle>Rename category</DrawerTitle>
-          <DrawerDescription>Update the category name.</DrawerDescription>
-        </DrawerHeader>
-
-        <form class="px-4 pb-2 space-y-4" @submit.prevent="renameCategory">
-          <div class="space-y-2">
-            <label class="text-sm" for="rename-category-name">Category name</label>
-            <Input id="rename-category-name" v-model="renameCategoryName" placeholder="Category name" ref="renameInputRef" />
-          </div>
-        </form>
-
-        <DrawerFooter>
-          <Button :disabled="!renameCategoryName.trim()" @click="renameCategory">Save</Button>
-          <DrawerClose as-child>
-            <Button variant="outline">Cancel</Button>
-          </DrawerClose>
-        </DrawerFooter>
-      </div>
-    </DrawerContent>
-  </Drawer>
+  <RenameCategory v-model:open="renameOpen" v-model="renameCategoryName" @rename="renameCategory" />
 
   <!-- Add participant drawer -->
-  <Drawer v-model:open="addPartOpen">
-    <DrawerContent>
-      <div class="mx-auto w-full max-w-sm">
-        <DrawerHeader>
-          <DrawerTitle>Add participant</DrawerTitle>
-          <DrawerDescription>Create a participant name.</DrawerDescription>
-        </DrawerHeader>
-        <form class="px-4 pb-2 space-y-4" @submit.prevent="addParticipant">
-          <div class="space-y-2">
-            <label class="text-sm" for="participant-name">Name</label>
-            <Input id="participant-name" v-model="newPartName" placeholder="e.g., Carol" ref="addPartInputRef" />
-          </div>
-        </form>
-        <DrawerFooter>
-          <Button :disabled="!newPartName.trim()" @click="addParticipant">Add</Button>
-          <DrawerClose as-child>
-            <Button variant="outline">Cancel</Button>
-          </DrawerClose>
-        </DrawerFooter>
-      </div>
-    </DrawerContent>
-  </Drawer>
+  <AddParticipant v-model:open="addPartOpen" @add="onAddParticipant" />
 
   <!-- Rename participant drawer -->
-  <Drawer v-model:open="renamePartOpen">
-    <DrawerContent>
-      <div class="mx-auto w-full max-w-sm">
-        <DrawerHeader>
-          <DrawerTitle>Rename participant</DrawerTitle>
-          <DrawerDescription>Update the participant name.</DrawerDescription>
-        </DrawerHeader>
-        <form class="px-4 pb-2 space-y-4" @submit.prevent="renameParticipant">
-          <div class="space-y-2">
-            <label class="text-sm" for="rename-participant-name">Name</label>
-            <Input id="rename-participant-name" v-model="renamePartName" placeholder="Name" ref="renamePartInputRef" />
-          </div>
-        </form>
-        <DrawerFooter>
-          <Button :disabled="!renamePartName.trim()" @click="renameParticipant">Save</Button>
-          <DrawerClose as-child>
-            <Button variant="outline">Cancel</Button>
-          </DrawerClose>
-        </DrawerFooter>
-      </div>
-    </DrawerContent>
-  </Drawer>
+  <RenameParticipant v-model:open="renamePartOpen" v-model="renamePartName" @rename="renameParticipant" />
 
   <!-- Delete participant confirm drawer -->
-  <Drawer v-model:open="deletePartOpen">
-    <DrawerContent>
-      <div class="mx-auto w-full max-w-sm">
-        <DrawerHeader>
-          <DrawerTitle>Delete participant?</DrawerTitle>
-          <DrawerDescription>
-            Deleting participant "{{ deletePartName }}" will remove all their scores from all categories. This cannot be undone.
-          </DrawerDescription>
-        </DrawerHeader>
-        <DrawerFooter>
-          <Button variant="destructive" @click="confirmDeleteParticipant">Yes, delete</Button>
-          <DrawerClose as-child>
-            <Button variant="outline">No, keep</Button>
-          </DrawerClose>
-        </DrawerFooter>
-      </div>
-    </DrawerContent>
-  </Drawer>
+  <DeleteParticipantConfirm v-model:open="deletePartOpen" :name="deletePartName" @confirm="confirmDeleteParticipant" />
 </template>
 
 <script setup lang="ts">
@@ -485,7 +250,7 @@ import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { useUserStore } from '@/stores/user'
-import { MoreVertical, Trash2, QrCode, Copy, Check, Settings, Plus, ChevronUp, ChevronDown, Star } from 'lucide-vue-next'
+import { MoreVertical, Trash2, QrCode, Settings, Plus, ChevronUp, ChevronDown, Star } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -494,17 +259,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/components/ui/drawer'
-import { Input } from '@/components/ui/input'
-import QrcodeVue from 'qrcode.vue'
+// Drawer components
+import ConfirmDeleteBoard from '@/drawers/ConfirmDeleteBoard.vue'
+import Invite from '@/drawers/Invite.vue'
+import Logs from '@/drawers/Logs.vue'
+import SettingsDrawer from '@/drawers/Settings.vue'
+import CreateCategory from '@/drawers/CreateCategory.vue'
+import RenameCategory from '@/drawers/RenameCategory.vue'
+import AddParticipant from '@/drawers/AddParticipant.vue'
+import RenameParticipant from '@/drawers/RenameParticipant.vue'
+import DeleteParticipantConfirm from '@/drawers/DeleteParticipantConfirm.vue'
 import { useProfilesStore } from '@/stores/profiles'
 import { removeParticipantData as removeParticipantDataCRDT } from '@/nostrToCRDT'
 import shortId from '@/lib/utils'
@@ -551,14 +315,13 @@ const CLIPBOARD_KEY = 'lik:lastCopiedBoardId'
 
 // Create category drawer state
 const createOpen = ref(false)
-const newCategoryName = ref('')
-const createInputRef = ref<any>(null)
+// name input handled inside CreateCategory component
 
 // Rename category drawer state
 const renameOpen = ref(false)
 const renameCategoryId = ref('')
 const renameCategoryName = ref('')
-const renameInputRef = ref<any>(null)
+// input focus handled inside RenameCategory component
 
 // Remember last open scoreboard
 watch(
@@ -582,11 +345,9 @@ function openLog() {
   logsOpen.value = true
 }
 function openAddParticipant() {
-  newPartName.value = ''
   addPartOpen.value = true
 }
 function openCreateCategory() {
-  newCategoryName.value = ''
   createOpen.value = true
 }
 function openRenameCategory(cid: string, currentName: string) {
@@ -644,15 +405,13 @@ function rejectJoin(reqId: string) {
   void store.reject(id.value, reqId)
 }
 
-// Create category action
-function createCategory() {
-  const name = newCategoryName.value.trim()
-  if (!id.value || !name) return
+// Create category action (from child component)
+function onCreateCategory(name: string) {
+  const n = name.trim()
+  if (!id.value || !n) return
   const cid = shortId()
-  addCategoryCRDT(id.value, cid, name)
+  addCategoryCRDT(id.value, cid, n)
   createOpen.value = false
-  newCategoryName.value = ''
- 
 }
 
 // Rename category action
@@ -748,12 +507,12 @@ function changeScore(categoryKey: string, participantId: string, delta: -1 | 1) 
   if (!id.value) return
   addScoreCRDT(id.value, categoryKey, participantId, delta)
   // After a score change, consider prompting backup reminder
-  try {
-    const brd = scoreboard.value
-    const createdAt = (brd && typeof brd.createdAt === 'number') ? brd.createdAt : null
+  // Precondition: only when editing own scoreboard (owner)
+  const brd = scoreboard.value
+  if (isOwner.value && brd && typeof brd.createdAt === 'number') {
     const backup = useBackupReminderStore()
-    backup.promptIfNeeded(createdAt)
-  } catch {}
+    backup.promptIfNeeded(brd.createdAt)
+  }
 }
 
 // Priority helpers
@@ -792,7 +551,6 @@ function moveCategoryUp(categoryKey: string) {
   const above = list[idx - 1]
   const current = list[idx]
   const aboveOrder = Number(above.value?.order ?? 0)
-  const curOrder = Number(current.value?.order ?? 0)
   // Find the next after above (two above current)
   const twoAbove = idx - 2 >= 0 ? list[idx - 2] : null
   if (!twoAbove) {
@@ -831,8 +589,15 @@ function subscribeBoardMetaIfNeeded() {
 }
 
 function subscribeBoardCRDT() {
-  if (!id.value) return
-  if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
+  if (!id.value) {
+    throw new Error('Board ID is required to subscribe to CRDT')
+  }
+  // If the scoreboard isn't loaded yet (store not hydrated), skip for now
+  if (!scoreboard.value) return
+  if (unsubCRDT) { 
+    try { unsubCRDT() } catch {}; 
+    unsubCRDT = null 
+  }
   store.subscribeBoardCRDT(id.value)
   unsubCRDT = () => store.unsubscribeBoardCRDT(id.value)
 }
@@ -841,7 +606,8 @@ function subscribeBoardCRDT() {
 let capRemove: undefined | (() => void)
 let onVis: undefined | (() => void)
 
-onMounted(() => {
+onMounted(async () => {
+  await store.ensureLoaded()
   subscribeBoardMetaIfNeeded()
   subscribeBoardCRDT()
   // Resubscribe CRDT on network reconnect to refresh state
@@ -881,59 +647,31 @@ onBeforeUnmount(() => {
 
 // (duplicate onBeforeUnmount removed)
 
-// Autofocus the category input when the drawer opens
-watch(createOpen, (open) => {
-  if (open) {
-    nextTick(() => {
-      if (createInputRef.value?.focus) {
-        createInputRef.value.focus()
-      } else if (createInputRef.value?.el?.focus) {
-        createInputRef.value.el.focus()
-      }
-    })
-  }
-})
-
-// Autofocus the rename input when the drawer opens
-watch(renameOpen, (open) => {
-  if (open) {
-    nextTick(() => {
-      if (renameInputRef.value?.focus) {
-        renameInputRef.value.focus()
-      } else if (renameInputRef.value?.el?.focus) {
-        renameInputRef.value.el.focus()
-      }
-    })
-  }
-})
+// Focus is handled inside drawer components
 
 // Participants UI state and actions
 const addPartOpen = ref(false)
-const newPartName = ref('')
-const addPartInputRef = ref<any>(null)
 const renamePartOpen = ref(false)
 const renamePartId = ref('')
 const renamePartName = ref('')
-const renamePartInputRef = ref<any>(null)
 const deletePartOpen = ref(false)
 const deletePartId = ref('')
 const deletePartName = ref('')
 
-function addParticipant() {
+function onAddParticipant(name: string) {
   if (!id.value) return
-  const name = newPartName.value.trim()
-  if (!name) return
+  const n = name.trim()
+  if (!n) return
   try {
     if (!scoreboard.value) return
     const next = [...(scoreboard.value.participants || [])]
     const newId = (crypto.randomUUID().slice(0, 6))
-    next.push({ id: newId, name })
+    next.push({ id: newId, name: n })
     scoreboard.value.participants = next
     void store.ensureBoardPREPublished(id.value, 'add participant')
     // owner publishes updated board metadata with participants
     // persisted by store watcher
     addPartOpen.value = false
-    newPartName.value = ''
   } catch {}
 }
 
@@ -981,21 +719,5 @@ async function confirmDeleteParticipant() {
   }
 }
 
-// Autofocus handlers for participant drawers
-watch(addPartOpen, (open) => {
-  if (open) {
-    nextTick(() => {
-      if (addPartInputRef.value?.focus) addPartInputRef.value.focus()
-      else if (addPartInputRef.value?.el?.focus) addPartInputRef.value.el.focus()
-    })
-  }
-})
-watch(renamePartOpen, (open) => {
-  if (open) {
-    nextTick(() => {
-      if (renamePartInputRef.value?.focus) renamePartInputRef.value.focus()
-      else if (renamePartInputRef.value?.el?.focus) renamePartInputRef.value.el.focus()
-    })
-  }
-})
+// Autofocus handled inside drawer components
 </script>

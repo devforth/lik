@@ -89,8 +89,8 @@
             <span class="text-sm font-medium">Offline</span>
           </div>
         </div>
-  <RouterView />
-  <BackupReminder />
+        <RouterView />
+        <BackupReminder />
         <Toaster class="pointer-events-auto" />
       </main>
     </SidebarProvider>
