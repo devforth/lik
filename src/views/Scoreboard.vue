@@ -594,7 +594,7 @@ function subscribeBoardCRDT() {
   }
   // If the scoreboard isn't loaded yet (store not hydrated), skip for now
   if (!scoreboard.value) return
-  if (unsubCRDT) { 
+  if (unsubCRDT) {
     try { unsubCRDT() } catch {}; 
     unsubCRDT = null 
   }

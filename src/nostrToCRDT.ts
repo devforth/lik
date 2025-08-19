@@ -80,7 +80,9 @@ async function publishSnapshot(boardId: string, state: EndingState) {
 export function subscribeToBoardCRDT(boardId: string, pubkeys: string[]) {
   const tagD = `lik::crdt::${boardId}`
   const me = useUserStore().getPubKey()
-  if (!me) throw new Error('No pubkey available')
+  if (!me) {
+    throw new Error('No pubkey available')
+  }
   // Ensure we always constrain by authors; if excluding self empties the list,
   // prefer not to constrain by authors at all to avoid missing owner updates.
   if (!Array.isArray(pubkeys)) {
@@ -93,9 +95,17 @@ export function subscribeToBoardCRDT(boardId: string, pubkeys: string[]) {
   // If we don't know any other authors yet, don't set an authors filter
   const key = `crdt:${boardId}`
 
+  // Always close any existing subscription for this board before (re)subscribing
   if (active.has(key)) {
     try { active.get(key)!.close() } catch {}
     active.delete(key)
+  }
+
+  // If there are no other authors yet (only myself in editors), skip subscribing for now.
+  // We'll subscribe later once another editor is approved and appears in the authors list.
+  if (authors.length === 0) {
+    console.info('[nostr] Skipping CRDT PRE subscription: no other authors yet', { boardId, editors: pubkeys })
+    return () => {}
   }
 
   const baseFilter: any = { kinds: [KIND_PRE] as any, '#d': [tagD], authors }

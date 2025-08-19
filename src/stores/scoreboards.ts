@@ -238,7 +238,10 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     const user = useUserStore()
     const me = user.getPubKey()
     const sb = items.value.find((s) => s.id === boardId)
-    if (!sb || !me) { console.log('[scoreboards] ensureBoardPREPublished: missing sb or me'); return }
+    if (!sb || !me) { 
+      console.log('[scoreboards] ensureBoardPREPublished: missing sb or me'); 
+      return 
+    }
     if (sb.authorPubKey !== me) { console.log('[scoreboards] ensureBoardPREPublished: not owner'); return } // only owner publishes
     if (!sb.secret) {
       console.log('[scoreboards] ensureBoardPREPublished: secret not ready')
@@ -442,7 +445,9 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       throw new Error('Invalid editors array')
     }
     if (!sb.editors.length) {
-      throw new Error('Empty editors array')
+      // Nothing to subscribe yet; wait until at least one editor is present
+      console.info('[scoreboards] Skipping CRDT subscribe: editors empty', { boardId })
+      return
     }
     // Compute a stable signature of authors list to detect changes
     const sig = sb.editors.slice().sort().join(',')
@@ -456,16 +461,21 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
       try { crdtUnsubById.get(boardId)!() } catch {}
       crdtUnsubById.delete(boardId)
     }
-    const unsub = subscribeToBoardCRDT(boardId, sb.editors)
+  const unsub = subscribeToBoardCRDT(boardId, sb.editors)
     crdtUnsubById.set(boardId, unsub)
     crdtSigById.set(boardId, sig)
   }
 
   function unsubscribeBoardCRDT(boardId: string) {
-    if (!crdtUnsubById.has(boardId)) return
-    try { crdtUnsubById.get(boardId)!() } catch {}
+    if (!crdtUnsubById.has(boardId)) {
+      return
+    }
+    try { 
+      crdtUnsubById.get(boardId)!()
+    } catch {}
+    console.log(`Unsubscribed from CRDT for board ${boardId}`)
     crdtUnsubById.delete(boardId)
-  crdtSigById.delete(boardId)
+    crdtSigById.delete(boardId)
   }
 
   function stopAllCRDTSubscriptions() {
@@ -519,8 +529,13 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
               if (sb2.authorPubKey !== nextOwner) { sb2.authorPubKey = nextOwner; changed = true }
               const curEditors = (sb2.editors || []).slice().sort().join(',')
               const newEditors = nextEditors.slice().sort().join(',')
-              if (curEditors !== newEditors) { sb2.editors = nextEditors; changed = true }
+              const editorsChanged = curEditors !== newEditors
+              if (editorsChanged) { sb2.editors = nextEditors; changed = true }
               if (changed) void saveAll(items.value)
+              // If editors list changed, attempt to (re)subscribe CRDT with the new authors list
+              if (editorsChanged) {
+                try { subscribeBoardCRDT(boardId) } catch {}
+              }
               // Sync participants if present
               try {
                 if (Array.isArray(meta?.participants)) {
@@ -570,6 +585,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     await saveAll(items.value)
     // Owner updates should re-publish board PRE
     void ensureBoardPREPublished(boardId, 'approve invite')
+  // Ensure CRDT subscription is established now that editors list changed
+  try { subscribeBoardCRDT(boardId) } catch {}
     // remove from lastRequests
     const list = lastRequests.value[boardId] || []
     lastRequests.value = { ...lastRequests.value, [boardId]: list.filter((r) => r.id !== eventId) }
