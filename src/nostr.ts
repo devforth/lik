@@ -84,7 +84,7 @@ export function nostrSubscribeTag(tag: string, onEvent: (event: NostrEvent, rela
     ],
     {
       onevent: (evt) => {
-        console.log('[nostr] event', { tag, evt })
+        console.log('💧 [nostr] event', { tag, evt })
         onEvent(evt)
       },
       oneose: () => {
@@ -233,7 +233,7 @@ export async function send(
         tags: Array.isArray(args.tags) ? args.tags : [],
         content: String(args.content ?? ''),
       }
-      console.info(`[nostr] sending event k:${args.kind}, t:${serializeTags(args.tags)}`, { pubkeyHex: args.pubkeyHex, kind: args.kind, content: args.content, tags: args.tags, relays: args.relays, originalContentForDbg: args.originalContentForDbg })
+      console.info(`💥[nostr] sending event k:${args.kind}, t:${serializeTags(args.tags)}`, { pubkeyHex: args.pubkeyHex, kind: args.kind, content: args.content, tags: args.tags, relays: args.relays, originalContentForDbg: args.originalContentForDbg })
       const sk = hexToBytes(String(args.privkeyHex))
       const rels = args.relays && args.relays.length ? args.relays : RELAYS
       const signed = finalizeEvent({ ...evt }, sk)
@@ -339,7 +339,7 @@ export async function getProfileHashPerRelay(
       new Promise<void>((resolve) => {
         let latest: any | null = null
         let resolved = false;
-        console.info('[nostr] fetching profile hash for', pubkeyHex, 'from relay', relay);
+        console.info('✏️ [nostr] fetching profile hash for', pubkeyHex, 'from relay', relay);
         const sub = pool.subscribeMany(
           [relay],
           [
@@ -500,7 +500,7 @@ export async function fetchLatestPREByDTag(
               if (!latest || curTs > bestTs) {
                 latest = evt
                 latestRelay = relay
-                console.info('[nostr] latest PRE event', { dTag, latest, relay })
+                console.info('💧 [nostr] latest PRE event', { dTag, latest, relay })
                 return
               }
               if (curTs === bestTs) {
@@ -510,7 +510,7 @@ export async function fetchLatestPREByDTag(
                 if (curId && bestId && curId.localeCompare(bestId) > 0) {
                   latest = evt
                   latestRelay = relay
-                  console.info('[nostr] latest PRE event (tie-break)', { dTag, latest, relay })
+                  console.info('💧 [nostr] latest PRE event (tie-break)', { dTag, latest, relay })
                 }
               }
             },

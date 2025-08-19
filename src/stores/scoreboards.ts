@@ -7,7 +7,7 @@ import { useUserStore } from '@/stores/user'
 import { toast } from 'vue-sonner'
 import { useProfilesStore } from '@/stores/profiles'
 import { dbGetAll, dbBulkPut, dbDelete, dbPut } from '@/lib/idb'
-import { subscribeToBoardCRDT, appendLogEvent as appendLogEventCRDT } from '@/nostrToCRDT'
+import { subscribeToBoardCRDT, appendLogEvent as appendLogEventCRDT, republishCRDT as republishCRDTCore } from '@/nostrToCRDT'
 import type { LogEntry as CRDTLogEntry } from '@/crdt'
 import shortId from '@/lib/utils'
 
@@ -44,8 +44,6 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   let hydrating = false
   // expose a readiness promise to let router/pages wait for initial load (lazy init)
   let __initPromise: Promise<void> | undefined
-  // track serialized signature of board fields to detect changes
-  const boardSig = new Map<string, string>()
   // track CRDT subscription authors signature per board to avoid needless resubscribes
   const crdtSigById = new Map<string, string>()
 
@@ -322,31 +320,6 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     { deep: true }
   )
 
-  // Auto-publish board PRE by owner when name/editors change
-  let preTimer: ReturnType<typeof setTimeout> | null = null
-  watch(
-    items,
-    () => {
-      if (hydrating) return
-      if (preTimer) clearTimeout(preTimer)
-      preTimer = setTimeout(() => {
-        try {
-          const me = useUserStore().getPubKey()
-          for (const sb of items.value) {
-            if (!me || sb.authorPubKey !== me) continue
-            const sig = JSON.stringify({ n: sb.name, o: sb.authorPubKey, e: (sb.editors || []).slice().sort() })
-            const prev = boardSig.get(sb.id)
-            if (sig !== prev) {
-              boardSig.set(sb.id, sig)
-              void ensureBoardPREPublished(sb.id, 'watch items in pinia scoreboards')
-            }
-          }
-        } catch {}
-      }, 300)
-    },
-    { deep: true }
-  )
-
   // Keep profiles store subscribed to all editors across scoreboards
   watch(
     items,
@@ -585,8 +558,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     await saveAll(items.value)
     // Owner updates should re-publish board PRE
     void ensureBoardPREPublished(boardId, 'approve invite')
-  // Ensure CRDT subscription is established now that editors list changed
-  try { subscribeBoardCRDT(boardId) } catch {}
+    // Ensure CRDT subscription is established now that editors list changed
+    try { subscribeBoardCRDT(boardId) } catch {}
     // remove from lastRequests
     const list = lastRequests.value[boardId] || []
     lastRequests.value = { ...lastRequests.value, [boardId]: list.filter((r) => r.id !== eventId) }
@@ -763,6 +736,8 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     updateSnapshot,
     verifyBoardPREEverywhere,
     ensureBoardPREPublished,
+    // Republish latest CRDT snapshot for a board
+    republishCRDT: (boardId: string) => republishCRDTCore(boardId),
     ensureLoaded: () => loadOnce(),
     // nostr helpers
     startJoinSubscriptions,

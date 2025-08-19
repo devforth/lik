@@ -110,10 +110,10 @@ export function subscribeToBoardCRDT(boardId: string, pubkeys: string[]) {
 
   const baseFilter: any = { kinds: [KIND_PRE] as any, '#d': [tagD], authors }
   const filters: Filter[] = [baseFilter]
-  console.info('[nostr] Subscribing to CRDT PRE', { boardId, authors, filters })
+  console.info('✏️ [nostr] Subscribing to CRDT PRE', { boardId, authors, filters })
   const sub = pool.subscribeMany(RELAYS, filters as any, {
   onevent: async (evt: any) => {
-    console.info('[nostr] PRE event CRDT', { evt })
+    console.info('💧 [nostr] PRE event CRDT', { evt })
       try {
         const content = String(evt?.content || '')
         const store = useScoreboardsStore()
@@ -406,4 +406,21 @@ export function appendLogEvent(boardId: string, entry: LogEntry): EndingState | 
   return next
 }
 
-export default { subscribeToBoardCRDT, addScore, addCategory, editCat, removeParticipantData, setPriority, clearPriority, appendLogEvent, setOrder }
+/**
+ * Republish the latest known CRDT snapshot for a board as-is.
+ * Returns true if a publish was attempted, false if no snapshot was available.
+ */
+export async function republishCRDT(boardId: string): Promise<boolean> {
+  try {
+    const store = useScoreboardsStore()
+    const sb = store.items.find((s) => s.id === boardId)
+    const snap = sb?.snapshot as EndingState | undefined
+    if (!sb || !snap) return false
+    await publishSnapshot(boardId, snap)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export default { subscribeToBoardCRDT, addScore, addCategory, editCat, removeParticipantData, setPriority, clearPriority, appendLogEvent, setOrder, republishCRDT }

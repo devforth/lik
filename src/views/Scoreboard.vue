@@ -332,6 +332,16 @@ watch(
   },
   { immediate: true }
 )
+// When navigating between boards in the same view, republish CRDT for the new board
+watch(id, async (val, oldVal) => {
+  if (!val || val === oldVal) return
+  try {
+    await store.ensureLoaded()
+    if (scoreboard.value) {
+      await (store as any).republishCRDT?.(val)
+    }
+  } catch {}
+})
 function openConfirm() {
   drawerOpen.value = true
 }
@@ -396,9 +406,12 @@ const canEdit = computed(() => {
   return list.includes(me)
 })
 
-function approveJoin(reqId: string, pubkey: string) {
+async function approveJoin(reqId: string, pubkey: string) {
   if (!id.value) return
-  void store.approve(id.value, reqId, pubkey)
+  // Approve join request in the store (updates editors list and republishes PRE)
+  await store.approve(id.value, reqId, pubkey)
+  // Explicitly (re)subscribe to CRDT after approval as requested
+  try { store.subscribeBoardCRDT(id.value) } catch {}
 }
 function rejectJoin(reqId: string) {
   if (!id.value) return
@@ -576,7 +589,10 @@ let unsubCRDT: null | (() => void) = null
 let unsubBRD: null | (() => void) = null
 
 function subscribeBoardMetaIfNeeded() {
-  if (!scoreboard.value || !id.value) return
+  if (!scoreboard.value || !id.value) {
+    console.error('[scoreboards] subscribeBoardMetaIfNeeded: missing scoreboard or id')
+    return
+  }
   if (isOwner.value) {
     // Owner: verify board PRE everywhere
     store.verifyBoardPREEverywhere(id.value)
@@ -588,12 +604,21 @@ function subscribeBoardMetaIfNeeded() {
   }
 }
 
+// Helper: count other authors (exclude myself)
+const otherAuthorsCount = computed(() => {
+  const me = user.getPubKey() || ''
+  const eds = Array.isArray(scoreboard.value?.editors) ? scoreboard.value!.editors : []
+  return eds.filter((p) => p && p !== me).length
+})
+
 function subscribeBoardCRDT() {
   if (!id.value) {
     throw new Error('Board ID is required to subscribe to CRDT')
   }
   // If the scoreboard isn't loaded yet (store not hydrated), skip for now
   if (!scoreboard.value) return
+  // Skip when there are no other authors yet; we'll re-run on editors change
+  if (otherAuthorsCount.value === 0) return
   if (unsubCRDT) {
     try { unsubCRDT() } catch {}; 
     unsubCRDT = null 
@@ -606,10 +631,18 @@ function subscribeBoardCRDT() {
 let capRemove: undefined | (() => void)
 let onVis: undefined | (() => void)
 
+watch(id, async (val, oldVal) => {
+  if (!val || val === oldVal) return
+  subscribeBoardMetaIfNeeded()
+  subscribeBoardCRDT()
+})
+
 onMounted(async () => {
   await store.ensureLoaded()
   subscribeBoardMetaIfNeeded()
   subscribeBoardCRDT()
+  // Republish latest CRDT snapshot on open to help peers catch up
+  try { await store.republishCRDT(id.value) } catch {}
   // Resubscribe CRDT on network reconnect to refresh state
   window.addEventListener('online', subscribeBoardCRDT)
   // Handle resume from background (Capacitor) and web visibility change
@@ -617,7 +650,9 @@ onMounted(async () => {
     // Always resubscribe CRDT
     subscribeBoardCRDT()
     // If not owner, also (re)subscribe to board metadata channel
-    if (!isOwner.value) subscribeBoardMetaIfNeeded()
+    subscribeBoardMetaIfNeeded()
+    // Republish snapshot on resume for fast convergence
+    try { void store.republishCRDT(id.value) } catch {}
   }
   // Web fallback
   onVis = () => { if (document.visibilityState === 'visible') onBecameActive() }
@@ -626,9 +661,9 @@ onMounted(async () => {
   ;(async () => {
     try {
       if (Capacitor?.isNativePlatform?.()) {
-  const capApp = '@capacitor/app'
-  const { App } = await import(/* @vite-ignore */ capApp as any)
-  const listener = await App.addListener('appStateChange', ({ isActive }: { isActive: boolean }) => {
+          const capApp = '@capacitor/app'
+          const { App } = await import(/* @vite-ignore */ capApp as any)
+          const listener = await App.addListener('appStateChange', ({ isActive }: { isActive: boolean }) => {
           if (isActive) onBecameActive()
         })
         capRemove = () => { try { listener.remove() } catch {} }
