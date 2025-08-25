@@ -495,6 +495,17 @@ function relTime(tsSec: number): string {
   return `${Math.floor(d/86400)}d ago`
 }
 
+// Short relative time for notifications: s/m/h/yesterday/d
+function timeAgoShort(tsSec: number): string {
+  const now = Math.floor(Date.now() / 1000)
+  const diff = Math.max(0, now - (Number(tsSec) || 0))
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  if (diff < 172800) return 'yesterday'
+  return `${Math.floor(diff / 86400)}d ago`
+}
+
 // Top-of-screen notifications for logs from other editors
 const notify = useLogNotifyStore()
 const lastSeenLogId = ref<string | null>(null)
@@ -502,18 +513,19 @@ const lastSeenTs = ref<number>(0)
 const myPubKey = computed(() => useUserStore().getPubKey() || '')
 
 function formatLogMessage(e: [string, string, number, string, string, string | null]): string {
-  const [, pub, , cid, action, pid] = e
+  const [, pub, ts, cid, action, pid] = e
   const who = eName(pub)
   const cat = categoryName(cid)
+  const ago = timeAgoShort(Number(ts))
   if (/^\+[0-9]+$/.test(action) || /^-[0-9]+$/.test(action)) {
     const s = action
     const forPart = pid ? ` • ${participantName(pid)}` : ''
-    return `${who} ${s}${forPart} in "${cat}"`
+    return `${who} ${s}${forPart} in "${cat}" • ${ago}`
   }
-  if (action === 'add-cat') return `${who} added category "${cat}"`
-  if (action === 'prio') return `${who} starred ${participantName(String(pid || ''))} in "${cat}"`
-  if (action === 'unprio') return `${who} unstarred ${participantName(String(pid || ''))} in "${cat}"`
-  return `${who} updated "${cat}"`
+  if (action === 'add-cat') return `${who} added category "${cat}" • ${ago}`
+  if (action === 'prio') return `${who} starred ${participantName(String(pid || ''))} in "${cat}" • ${ago}`
+  if (action === 'unprio') return `${who} unstarred ${participantName(String(pid || ''))} in "${cat}" • ${ago}`
+  return `${who} updated "${cat}" • ${ago}`
 }
 
 // Watch the snapshot events ascending (as stored), enqueue unseen remote logs oldest-first
