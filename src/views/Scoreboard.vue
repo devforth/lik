@@ -280,6 +280,7 @@ import {
 } from '@/nostrToCRDT'
 import { Capacitor } from '@capacitor/core'
 import { useBackupReminderStore } from '@/stores/backupReminder'
+import { useLogNotifyStore } from '@/stores/logNotify'
 
 const route = useRoute()
 const router = useRouter()
@@ -493,6 +494,90 @@ function relTime(tsSec: number): string {
   if (d < 86400) return `${Math.floor(d/3600)}h ago`
   return `${Math.floor(d/86400)}d ago`
 }
+
+// Top-of-screen notifications for logs from other editors
+const notify = useLogNotifyStore()
+const lastSeenLogId = ref<string | null>(null)
+const lastSeenTs = ref<number>(0)
+const myPubKey = computed(() => useUserStore().getPubKey() || '')
+
+function formatLogMessage(e: [string, string, number, string, string, string | null]): string {
+  const [, pub, , cid, action, pid] = e
+  const who = eName(pub)
+  const cat = categoryName(cid)
+  if (/^\+[0-9]+$/.test(action) || /^-[0-9]+$/.test(action)) {
+    const s = action
+    const forPart = pid ? ` • ${participantName(pid)}` : ''
+    return `${who} ${s}${forPart} in "${cat}"`
+  }
+  if (action === 'add-cat') return `${who} added category "${cat}"`
+  if (action === 'prio') return `${who} starred ${participantName(String(pid || ''))} in "${cat}"`
+  if (action === 'unprio') return `${who} unstarred ${participantName(String(pid || ''))} in "${cat}"`
+  return `${who} updated "${cat}"`
+}
+
+// Watch the snapshot events ascending (as stored), enqueue unseen remote logs oldest-first
+watch(
+  () => (scoreboard.value?.snapshot?.events || []) as [string, string, number, string, string, string | null][],
+  (events) => {
+    if (!Array.isArray(events) || !events.length) return
+    const me = myPubKey.value
+    // Find new events after last seen id; maintain a simple marker by id or fallback to time
+    const existingIdx = lastSeenLogId.value ? events.findIndex((e) => String(e?.[0]) === lastSeenLogId.value) : -1
+    let newList = [] as [string, string, number, string, string, string | null][]
+    if (existingIdx === -1) {
+      if (lastSeenLogId.value) {
+        // Marker missing (trim or rebase). Use timestamp guard to avoid spamming old ones
+        newList = events.filter((e) => Number(e?.[2] || 0) > (lastSeenTs.value || 0))
+      } else {
+        // First run: don't notify existing history
+        newList = []
+      }
+    } else {
+      newList = events.slice(existingIdx + 1)
+    }
+    // Filter remote only (exclude my own)
+    const remote = newList.filter((e) => String(e?.[1] || '') && String(e[1]) !== me)
+    if (!remote.length) {
+      // Update last seen to latest
+      const last = events[events.length - 1]
+      lastSeenLogId.value = String(last?.[0] || lastSeenLogId.value || '')
+      lastSeenTs.value = Number(last?.[2] || lastSeenTs.value || 0)
+      return
+    }
+    // Enqueue oldest first to satisfy order
+    for (const e of remote) {
+      const message = formatLogMessage(e)
+      notify.enqueue({ message, durationMs: 5000 })
+    }
+    // Advance marker to latest
+    const last = events[events.length - 1]
+    lastSeenLogId.value = String(last?.[0] || lastSeenLogId.value || '')
+    lastSeenTs.value = Number(last?.[2] || lastSeenTs.value || 0)
+  },
+  { deep: false }
+)
+
+// Initialize markers to current latest on mount and when switching boards
+onMounted(() => {
+  const evts = (scoreboard.value?.snapshot?.events || []) as [string, string, number, string, string, string | null][]
+  if (evts.length) {
+    const last = evts[evts.length - 1]
+    lastSeenLogId.value = String(last?.[0] || '')
+    lastSeenTs.value = Number(last?.[2] || 0)
+  }
+})
+watch(id, () => {
+  const evts = (scoreboard.value?.snapshot?.events || []) as [string, string, number, string, string, string | null][]
+  if (evts.length) {
+    const last = evts[evts.length - 1]
+    lastSeenLogId.value = String(last?.[0] || '')
+    lastSeenTs.value = Number(last?.[2] || 0)
+  } else {
+    lastSeenLogId.value = null
+    lastSeenTs.value = 0
+  }
+})
 
 // Categories from snapshot, sorted by order desc (higher first) then name, visible only, excluding ::prio shadow categories
 const categoriesList = computed(() => {

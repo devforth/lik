@@ -89,7 +89,8 @@
             <span class="text-sm font-medium">Offline</span>
           </div>
         </div>
-        <RouterView />
+  <RouterView />
+  <TopLogNotify />
         <BackupReminder />
         <Toaster class="pointer-events-auto" />
       </main>
@@ -116,6 +117,7 @@ import { ChevronUp, WifiOff, Moon, Sun } from 'lucide-vue-next'
 import { Switch } from '@/components/ui/switch'
 import { useTheme } from './theme'
 import BackupReminder from '@/components/BackupReminder.vue'
+import TopLogNotify from '@/components/TopLogNotify.vue'
 
 
 const scoreboardsStore = useScoreboardsStore()
