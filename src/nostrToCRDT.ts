@@ -2,7 +2,7 @@
 
 import { SimplePool } from 'nostr-tools/pool'
 import type { Filter } from 'nostr-tools'
-import { RELAYS, sendPRE, KIND_PRE } from '@/nostr'
+import { RELAYS, sendPRE, KIND_PRE, RELAY_DEBOUNCE_SEC } from '@/nostr'
 import { canonicalJSONStringify } from '@/lib/utils'
 import shortId from '@/lib/utils'
 import { nowUtc } from '@/time-sync'
@@ -12,6 +12,9 @@ import { useUserStore } from '@/stores/user'
 
 const pool = new SimplePool()
 const active = new Map<string, { close: () => void }>()
+
+// Use the same debounce duration as relay publishes (ms)
+const LOG_DEBOUNCE_MS = Math.max(0, Math.floor(Number(RELAY_DEBOUNCE_SEC || 0.5) * 1000))
 
 function isEditor(boardId: string, me: string): boolean {
   const store = useScoreboardsStore()
@@ -42,6 +45,54 @@ function appendActionLog(prev: EndingState, me: string, action: ActionLog, categ
   const tsSec = Math.floor(nowUtc() / 1000)
   const entry: LogEntry = [eid, me, tsSec, String(categoryId), action, participantId == null ? null : String(participantId)]
   return appendLogToState(prev, entry)
+}
+
+// ---------------- Debounced log aggregation for rapid +1/-1 clicks -----------------
+type Sign = '+' | '-'
+type PendingKey = string
+type PendingBucket = { count: number; timeout: ReturnType<typeof setTimeout> }
+const pendingLogs = new Map<PendingKey, PendingBucket>()
+
+function makePendingKey(boardId: string, categoryId: string, participantId: string, sign: Sign): PendingKey {
+  return `${boardId}|${categoryId}|${participantId}|${sign}`
+}
+
+function flushPendingLog(boardId: string, categoryId: string, participantId: string, sign: Sign) {
+  const key = makePendingKey(boardId, categoryId, participantId, sign)
+  const bucket = pendingLogs.get(key)
+  if (!bucket) return
+  pendingLogs.delete(key)
+
+  const user = useUserStore()
+  const me = user.getPubKey() || ''
+  if (!me) return
+  const cnt = Math.max(1, Math.floor(bucket.count))
+  const action = `${sign}${cnt}`
+  const eid = shortId()
+  const tsSec = Math.floor(nowUtc() / 1000)
+  const entry: LogEntry = [eid, me, tsSec, String(categoryId), action, String(participantId)]
+  // Append log to snapshot and publish a snapshot to include it (publish is already debounced per tag)
+  const store = useScoreboardsStore()
+  const board = store.items.find((s) => s.id === boardId)
+  if (!board) return
+  const base = new ScoreboardCRDT(me, board.snapshot || undefined)
+  const next = appendLogToState(base.getState(), entry)
+  void store.updateSnapshot(boardId, next)
+  void publishSnapshot(boardId, next)
+}
+
+function scheduleAggregatedLog(boardId: string, categoryId: string, participantId: string, delta: -1 | 1) {
+  const sign: Sign = delta === 1 ? '+' : '-'
+  const key = makePendingKey(boardId, categoryId, participantId, sign)
+  const existing = pendingLogs.get(key)
+  if (existing) {
+    clearTimeout(existing.timeout)
+    existing.count += 1
+    existing.timeout = setTimeout(() => flushPendingLog(boardId, categoryId, participantId, sign), LOG_DEBOUNCE_MS)
+  } else {
+    const timeout = setTimeout(() => flushPendingLog(boardId, categoryId, participantId, sign), LOG_DEBOUNCE_MS)
+    pendingLogs.set(key, { count: 1, timeout })
+  }
 }
 
 async function publishSnapshot(boardId: string, state: EndingState) {
@@ -154,8 +205,8 @@ export function addScore(boardId: string, categoryKey: string, participantId: st
   if (!board) return null
   const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
   let next = crdt.addScore(categoryKey, participantId, delta)
-  // Append log inline to snapshot (avoid second publish path)
-  next = appendActionLog(next, me, delta === 1 ? '+1' : '-1', String(categoryKey), String(participantId))
+  // Debounced aggregated log: schedule aggregation and avoid per-click +1/-1 log entries
+  scheduleAggregatedLog(boardId, String(categoryKey), String(participantId), delta)
   void store.updateSnapshot(boardId, next)
   // Publish PRE snapshot for others to merge
   void publishSnapshot(boardId, next)

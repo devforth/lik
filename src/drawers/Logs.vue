@@ -15,8 +15,8 @@
               <div class="text-sm font-medium truncate">{{ eName(e[1]) }}</div>
               <div class="text-xs text-muted-foreground">{{ relTime(e[2]) }}</div>
               <div class="text-sm mt-1">
-                <span v-if="e[4] === '+1'">+1</span>
-                <span v-else-if="e[4] === '-1'">-1</span>
+                <span v-if="/^\+[0-9]+$/.test(e[4])">{{ e[4] }}</span>
+                <span v-else-if="/^-[0-9]+$/.test(e[4])">{{ e[4] }}</span>
                 <span v-else-if="e[4] === 'add-cat'">Added category</span>
                 <span v-else-if="e[4] === 'prio'">Star</span>
                 <span v-else-if="e[4] === 'unprio'">Unstar</span>
