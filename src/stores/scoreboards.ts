@@ -340,12 +340,25 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     { deep: true, immediate: true }
   )
 
-  type JoinReq = { id: string; pubkey: string; createdAt: number; name?: string; picture?: string }
+  type JoinReq = { 
+    id: string; pubkey: string; 
+    createdAt: number; 
+    name?: string; 
+    picture?: string 
+  }
 
   function pushJoinRequest(boardId: string, req: JoinReq) {
     const list = lastRequests.value[boardId] || []
     // dedupe by event id
-    if (list.some((r) => r.id === req.id)) return
+    if (list.some((r) => r.id === req.id)) {
+      return
+    }
+    // dedupe by pubkey, check against existing board editors
+    const sb = items.value.find((s) => s.id === boardId)
+    if (sb && Array.isArray(sb.editors) && sb.editors.includes(req.pubkey)) {
+      return
+    }
+
     const next = [...list, req].sort((a, b) => b.createdAt - a.createdAt).slice(0, 3)
     lastRequests.value = { ...lastRequests.value, [boardId]: next }
   }
