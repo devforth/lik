@@ -58,14 +58,14 @@
       <!-- Import drawer trigger -->
       <Drawer>
         <DrawerTrigger as-child>
-          <Button>Import nsec</Button>
+          <Button>Restore from private key</Button>
         </DrawerTrigger>
         <DrawerContent>
           <div class="mx-auto w-full max-w-lg p-4 space-y-4">
             <DrawerHeader>
-              <DrawerTitle>Import private key</DrawerTitle>
+              <DrawerTitle>Restore from private key</DrawerTitle>
               <DrawerDescription>
-                Paste your nsec1 key to recover your profile and boards. This will erase all local data before importing.
+                Paste your nsec1 private key to recover your profile and boards. This will erase all local data before importing.
               </DrawerDescription>
             </DrawerHeader>
             <div class="space-y-2">
@@ -148,7 +148,7 @@ function remindLater() { backupStore.remindLater() }
 async function onImport() {
   importError.value = ''
   const raw = (importNsec.value || '').trim()
-  if (!raw) { importError.value = 'Enter nsec1 key' ; return }
+  if (!raw) { importError.value = 'Enter nsec1 private key' ; return }
   let skHex = ''
   try {
     const dec = nip19.decode(raw)
