@@ -56,7 +56,7 @@
       </Drawer>
 
       <!-- Import drawer trigger -->
-      <Drawer>
+      <Drawer v-model:open="importDrawerOpen">
         <DrawerTrigger as-child>
           <Button>Restore from private key</Button>
         </DrawerTrigger>
@@ -138,6 +138,7 @@ async function copyNsec() {
 const importNsec = ref('')
 const importError = ref('')
 const busy = ref(false)
+const importDrawerOpen = ref(false)
 
 // MyProfile backup drawer gated reveal
 const mpReveal = ref(false)
@@ -192,10 +193,10 @@ async function onImport() {
       const prof = await fetchLatestProfile(pkHex, 4000)
       const data: any = prof?.data || {}
       const name = String(data?.name || data?.display_name || data?.username || '') || 'user'
-      const picture = String(data?.picture || '')
+      const remoteSeed = String(data?.avatarSeed || name || 'user') || name
       // update store fields
       await userStore.updateNickname(name)
-      userStore.profile!.avatarSeed = name
+      userStore.profile!.avatarSeed = remoteSeed
       await dbPut('user', userStore.profile)
     } catch {}
 
@@ -210,7 +211,6 @@ async function onImport() {
 
     // Note: A better approach is a relay-side search by authors + kind + #d prefix, but nostr-tools filter doesn't support prefix.
     // We'll try to fetch boards referenced by CRDT PREs authored by pkHex across relays by scanning EOSE limited window per relay.
-    // Implement a small per-relay scan for PREs authored by pkHex and parse d tag values we get back during EOSE.
     const { SimplePool } = await import('nostr-tools/pool')
     const pool = new SimplePool()
 
@@ -282,6 +282,7 @@ async function onImport() {
     }
 
     toast.success('Key imported', { description: `${recovered.size} boards recovered` })
+    importDrawerOpen.value = false
   } catch (e:any) {
     console.error('import failed', e)
     importError.value = 'Import failed'

@@ -152,6 +152,7 @@ export const useUserStore = defineStore('user', () => {
       name: p?.nickname || '',
       picture: avatarDataUri.value,
       about: 'LIK user',
+      avatarSeed: p?.avatarSeed || p?.nickname || '', // include avatarSeed so imports can restore it
     }
   }
 
