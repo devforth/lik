@@ -11,7 +11,7 @@
   </div>
 
   <!-- Loaded state -->
-  <div v-else-if="ready && scoreboard" class="p-4 space-y-6">
+  <div v-else-if="ready && scoreboard" class="p-4 space-y-6 pb-[70px]">
     <div class="flex items-start justify-between gap-2">
       <div>
         <h1 class="text-2xl font-semibold">{{ scoreboard?.name ?? 'Scoreboard' }}</h1>
@@ -186,7 +186,7 @@
   </div>
 
   <!-- Loading skeleton state -->
-  <div v-else class="p-4 space-y-6">
+  <div v-else class="p-4 space-y-6 pb-[0px]">
     <div class="flex items-start justify-between gap-2">
       <div class="space-y-2 w-full max-w-screen-sm">
         <Skeleton class="h-7 w-40" />
