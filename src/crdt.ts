@@ -125,6 +125,21 @@ export class ScoreboardCRDT {
     return this.getState()
   }
 
+  /** Remove a category entirely (hard delete). We model deletion by setting visibility to 0 and clearing its counters & name. */
+  removeCategory(categoryKey: string): EndingState {
+    const c = this.ensureCategory(categoryKey)
+    const ts = nowUtc()
+    // Mark invisible (LWW) and blank name so peers can GC from UI; keep id for tie-breakers.
+    if (ts > c.visTs) { c.vis = 0; c.visTs = ts }
+    if (ts > c.nameTs) { c.name = ''; c.nameTs = ts }
+    // Optionally zero out order so it sinks.
+    if (ts > c.orderTs) { c.order = 0; c.orderTs = ts }
+    // Clear counters
+    c.state.P = {}
+    c.state.N = {}
+    return this.getState()
+  }
+
   /** Merge another EndingState into this, returning ending state. */
   merge(other: EndingState): EndingState {
     if (!other || typeof other !== 'object') return this.getState()

@@ -105,6 +105,9 @@
                         <DropdownMenuItem :disabled="!canMoveCategoryUp(cat.key)" @click="moveCategoryUp(cat.key)">
                           <span>Move category up</span>
                         </DropdownMenuItem>
+                        <DropdownMenuItem variant="destructive" @click="openDeleteCategory(cat.key, cat.value.name || '')">
+                          <span>Delete</span>
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -235,6 +238,20 @@
   <!-- Rename category drawer -->
   <RenameCategory v-model:open="renameOpen" v-model="renameCategoryName" @rename="renameCategory" />
 
+  <!-- Delete category confirmation drawer -->
+  <div v-if="deleteCatOpen" class="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-black/30">
+    <div class="bg-background w-full sm:max-w-sm rounded-t-lg sm:rounded-lg p-4 space-y-4 shadow-lg">
+      <div class="space-y-1">
+        <h2 class="text-lg font-semibold">Delete category</h2>
+        <p class="text-sm text-muted-foreground">Delete <span class="font-medium">{{ deleteCatName || 'this category' }}</span>? Scores under it will be lost. This action cannot be undone.</p>
+      </div>
+      <div class="flex gap-2 justify-end">
+        <Button variant="outline" @click="deleteCatOpen = false">Cancel</Button>
+        <Button variant="destructive" @click="confirmDeleteCategory">Delete</Button>
+      </div>
+    </div>
+  </div>
+
   <!-- Add participant drawer -->
   <AddParticipant v-model:open="addPartOpen" @add="onAddParticipant" />
 
@@ -276,6 +293,7 @@ import {
   addCategory as addCategoryCRDT, 
   addScore as addScoreCRDT, 
   editCat as editCatCRDT, 
+  deleteCategory as deleteCategoryCRDT,
   setPriority as setPriorityCRDT, clearPriority as clearPriorityCRDT, setOrder as setOrderCRDT 
 } from '@/nostrToCRDT'
 import { Capacitor } from '@capacitor/core'
@@ -322,6 +340,10 @@ const createOpen = ref(false)
 const renameOpen = ref(false)
 const renameCategoryId = ref('')
 const renameCategoryName = ref('')
+// Delete category confirmation state
+const deleteCatOpen = ref(false)
+const deleteCatId = ref('')
+const deleteCatName = ref('')
 // input focus handled inside RenameCategory component
 
 // Remember last open scoreboard
@@ -365,6 +387,11 @@ function openRenameCategory(cid: string, currentName: string) {
   renameCategoryId.value = cid
   renameCategoryName.value = currentName
   renameOpen.value = true
+}
+function openDeleteCategory(cid: string, currentName: string) {
+  deleteCatId.value = cid
+  deleteCatName.value = currentName
+  deleteCatOpen.value = true
 }
 async function confirmDelete() {
   if (!id.value) return
@@ -441,6 +468,13 @@ function renameCategory() {
   } catch (e) {
     // noop
   }
+}
+function confirmDeleteCategory() {
+  if (!id.value || !deleteCatId.value) return
+  try { deleteCategoryCRDT(id.value, deleteCatId.value) } catch {}
+  deleteCatOpen.value = false
+  deleteCatId.value = ''
+  deleteCatName.value = ''
 }
 
 // profiles store subscriptions are managed globally by the scoreboards store

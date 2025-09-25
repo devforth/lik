@@ -321,6 +321,24 @@ export function editCat(boardId: string, id: string, name: string): EndingState 
   return merged
 }
 
+/** Delete a category (hard delete semantics via removeCategory + log). */
+export function deleteCategory(boardId: string, categoryKey: string): EndingState | null {
+  const store = useScoreboardsStore()
+  const me = useUserStore().getPubKey()
+  if (!me) throw new Error('No pubkey available')
+  if (!isEditor(boardId, me)) {
+    throw new Error('Not authorized to delete category - insufficient permissions')
+  }
+  const board = store.items.find((s) => s.id === boardId)
+  if (!board) return null
+  const base = new ScoreboardCRDT(me, board.snapshot || undefined)
+  const after = base.removeCategory(categoryKey)
+  // Log as add-cat inverse not defined; reuse add-cat semantics? Better to omit or create a new action; we'll skip log to reduce noise.
+  void store.updateSnapshot(boardId, after)
+  void publishSnapshot(boardId, after)
+  return after
+}
+
 /**
  * Set priority for a participant within a category using the category's shadow key `${categoryKey}::prio`.
  * Implements single-selection priority by adding +1 for the chosen participant and -1 for all others.
@@ -474,4 +492,4 @@ export async function republishCRDT(boardId: string): Promise<boolean> {
   }
 }
 
-export default { subscribeToBoardCRDT, addScore, addCategory, editCat, removeParticipantData, setPriority, clearPriority, appendLogEvent, setOrder, republishCRDT }
+export default { subscribeToBoardCRDT, addScore, addCategory, editCat, deleteCategory, removeParticipantData, setPriority, clearPriority, appendLogEvent, setOrder, republishCRDT }
