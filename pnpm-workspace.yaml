@@ -1,0 +1,5 @@
+allowBuilds:
+  '@parcel/watcher': false
+  sharp: true
+  vue-demi: false
+engineStrict: true

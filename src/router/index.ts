@@ -4,6 +4,7 @@ import Scoreboard from '@/views/Scoreboard.vue'
 import JoinBoard from '@/views/JoinBoard.vue'
 import MyProfile from '@/views/MyProfile.vue'
 import HomeRedirector from '@/views/HomeRedirector.vue'
+import About from '@/views/About.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -32,6 +33,11 @@ const router = createRouter({
       path: '/profile',
       name: 'my-profile',
       component: MyProfile,
+    },
+    {
+      path: '/about',
+      name: 'about',
+      component: About,
     },
   ],
 })

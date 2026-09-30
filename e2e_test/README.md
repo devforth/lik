@@ -2,9 +2,9 @@
 
 Rough Playwright + relay scripts used while fixing sync (2026-09). Not a test suite, just scripts to rerun.
 
-Setup once: `npx playwright install chromium`
+Setup once: `pnpm exec playwright install chromium`
 
-Run against a served build (`npm run build && npx vite preview --port 5391`, or `npx vite --port 5391`):
+Run against a served build (`pnpm build && pnpm preview --port 5391`, or `pnpm dev --port 5391`):
 
 - `node e2e_test/e2e-sync.mjs` – create board, +1, offline taps, back online, sync sheet
 - `node e2e_test/e2e-pending.mjs` – relays unreachable while online -> "Not sent", auto-retry recovers

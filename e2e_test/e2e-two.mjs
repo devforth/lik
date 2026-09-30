@@ -2,7 +2,7 @@
 import { chromium } from 'playwright'
 
 const BASE = process.env.BASE || 'http://localhost:5391'
-const OUT = process.env.OUT || new URL('./out', import.meta.url).pathname
+const OUT = process.env.OUT || `${import.meta.dirname}/out`
 import('node:fs').then((fs) => fs.mkdirSync(OUT, { recursive: true }))
 const t0 = Date.now()
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a)

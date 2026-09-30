@@ -1,17 +1,19 @@
 # ---------- Stage 1: Web build + Capacitor sync ----------
-FROM node:22-slim AS web
+FROM node:24-slim AS web
 WORKDIR /workspace
 
 # (git is sometimes needed for dependencies)
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies and build web
-COPY package*.json ./
-RUN npm ci
+# Install dependencies and build web (pnpm version comes from package.json "packageManager")
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY . .
-RUN npm run build
+RUN pnpm run build
 # Sync Android project (non-interactively via CI=1)
-RUN CI=1 npx cap sync android
+RUN CI=1 pnpm exec cap sync android
 
 # ---------- Stage 2: Android build ----------
 FROM mobiledevops/android-sdk-image:latest

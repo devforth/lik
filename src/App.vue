@@ -74,6 +74,11 @@
                       <span>My Profile</span>
                     </DropdownMenuItem>
                   </CloseMobileSidebar>
+                  <CloseMobileSidebar>
+                    <DropdownMenuItem @click="router.push({ name: 'about' })">
+                      <span>About</span>
+                    </DropdownMenuItem>
+                  </CloseMobileSidebar>
                 </DropdownMenuContent>
               </DropdownMenu>
             </SidebarMenuItem>

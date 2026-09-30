@@ -4,6 +4,8 @@
 
 Collaborative scoreboards you can share with a QR code, sync in real time across devices, and keep end‑to‑end encrypted. Built with Vue 3 + Vite, powered by Nostr relays, and packaged for Android with Capacitor.
 
+Open source, made by <a href="https://devforth.io"><b>DevForth</b></a>.
+
 <br/>
 
 <a href="https://play.google.com/store/apps/details?id=io.devforth.lik&hl=en"><b>Get it on Google Play</b></a>
@@ -106,19 +108,19 @@ Key modules (by file)
 ## Getting started (local)
 
 Prerequisites
-- Node.js: ^20.19.0 or >=22.12.0 (see `package.json` engines)
-- npm (comes with Node)
+- Node.js 24+ (`nvm use` picks it from `.nvmrc`; enforced by `package.json` engines)
+- pnpm (`corepack enable` picks the version from package.json)
 
 Install & run (web/PWA)
 1) Install deps
-	 - `npm install`
+	 - `pnpm install`
 2) Start dev server
-	 - `npm run dev`
+	 - `pnpm dev`
 3) Open the printed local URL (Vite default is http://localhost:5173)
 
 Build (web)
-- Type check + build: `npm run build`
-- Preview build locally: `npm run preview`
+- Type check + build: `pnpm build`
+- Preview build locally: `pnpm preview`
 
 Run as PWA
 - Open in a modern browser, then “Install”/“Add to home screen”. Icons & manifest are included under `public/`.
@@ -126,8 +128,8 @@ Run as PWA
 ## Android (Capacitor)
 
 Option A — Android Studio
-1) Build the web app: `npm run build`
-2) Sync native project: `npx cap sync android`
+1) Build the web app: `pnpm build`
+2) Sync native project: `pnpm exec cap sync android`
 3) Open `android/` in Android Studio and run on device/emulator or assemble a release
 
 Option B — Docker one‑shot release build
