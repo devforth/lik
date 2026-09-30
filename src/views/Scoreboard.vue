@@ -272,7 +272,7 @@ import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { useUserStore } from '@/stores/user'
-import { MoreVertical, Trash2, QrCode, Settings, Plus, ChevronUp, ChevronDown, Star } from 'lucide-vue-next'
+import { MoreVertical, Trash2, QrCode, Settings, Plus, ChevronUp, ChevronDown, Star } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {

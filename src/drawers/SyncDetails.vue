@@ -58,7 +58,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Check, Circle, CloudAlert, CloudCheck, CloudDownload, CloudUpload, Smartphone, X } from 'lucide-vue-next'
+import { Check, Circle, CloudAlert, CloudCheck, CloudDownload, CloudUpload, Smartphone, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { RELAYS } from '@/nostr'
@@ -93,7 +93,7 @@ const description = computed(() => {
   const s = status.value
   if (!s) return ''
   switch (s.state) {
-    case 'pending': return "Other editors won't see them yet. Lik retries automatically every 15 seconds."
+    case 'pending': return "Other editors won't see them yet. Lik retries automatically every 10 seconds."
     case 'offline': return "You're offline. They will be sent when the connection is back."
     case 'sending': return 'Waiting for relays to confirm they have them.'
     case 'checking': return 'Loading the latest scores from relays.'

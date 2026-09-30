@@ -24,21 +24,8 @@ export const RELAYS = [
   'wss://nostr-01.yakihonne.com',
 ]
 
-// nostr-tools gives a relay 3 s to connect and 4.4 s to answer a publish; on 2G that fails every time
-const RELAY_TIMEOUT_MS = 15_000
-
-class SlowNetworkPool extends SimplePool {
-  maxWaitForConnection = RELAY_TIMEOUT_MS
-
-  async ensureRelay(url: string, params?: { connectionTimeout?: number; abort?: AbortSignal }) {
-    const relay = await super.ensureRelay(url, params)
-    relay.publishTimeout = RELAY_TIMEOUT_MS
-    return relay
-  }
-}
-
 // Shared pool instance for the whole app; ping detects sockets that died without a close event
-const pool = new SlowNetworkPool({ enablePing: true })
+const pool = new SimplePool({ enablePing: true })
 
 // Keep local refs to open subscriptions by key for optional housekeeping
 const activeSubs = new Map<string, { close: () => void }>()
@@ -104,11 +91,7 @@ export function subscribeLive(
 }
 
 /** Drop every relay socket and reopen live subscriptions on fresh connections. */
-let lastReconnectAt = 0
 export function reconnectRelays() {
-  // 'online' can fire twice in a row; a second reset would kill publishes on the fresh sockets
-  if (Date.now() - lastReconnectAt < 3000) return
-  lastReconnectAt = Date.now()
   console.info('[nostr] reconnecting relays')
   // Closing sockets fires onclose of live subscriptions synchronously; reopen() then cancels their backoff timers
   pool.destroy()
@@ -338,8 +321,11 @@ export async function send(
       const results = Promise.all(pubs.map((p, i) => p.then(
         (reason: any) => ({ relay: rels[i], ok: true, reason: String(reason ?? '') }),
         (e: any) => {
-          console.warn('[nostr] publish error:', rels[i], e?.message ?? e)
-          return { relay: rels[i], ok: false, reason: String(e?.message ?? e) }
+          const reason = String(e?.message ?? e)
+          console.warn('[nostr] publish error:', rels[i], reason)
+          // No answer at all: the socket died silently (dead zone), drop it so the retry dials again
+          if (reason.includes('publish timed out')) pool.close([rels[i]])
+          return { relay: rels[i], ok: false, reason }
         },
       )))
       return { event: signed, results }

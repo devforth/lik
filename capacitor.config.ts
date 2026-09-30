@@ -8,9 +8,6 @@ const config: CapacitorConfig = {
     Keyboard: {
       resizeOnFullScreen: true
     }
-  },
-  android: {
-    adjustMarginsForEdgeToEdge: 'force'
   }
 };
 

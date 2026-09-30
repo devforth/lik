@@ -57,7 +57,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'vue-sonner'
 import { useRouter } from 'vue-router'
-import { ArrowLeft } from 'lucide-vue-next'
+import { ArrowLeft } from '@lucide/vue'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 
 const router = useRouter()

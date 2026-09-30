@@ -9,6 +9,11 @@
   padding-top: calc(env(safe-area-inset-top, 0px));
 }
 
+/* Tailwind 4.3 moved its default to a Roboto-first stack; keep the platform UI font (OEM fonts on Android) */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

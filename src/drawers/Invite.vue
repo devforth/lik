@@ -42,7 +42,7 @@ import QrcodeVue from 'qrcode.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
-import { Copy, Check } from 'lucide-vue-next'
+import { Copy, Check } from '@lucide/vue'
 
 const props = defineProps<{ open: boolean; boardId: string; copied: boolean }>()
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void; (e: 'copy'): void }>()

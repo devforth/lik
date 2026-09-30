@@ -1,5 +1,5 @@
 # ---------- Stage 1: Web build + Capacitor sync ----------
-FROM node:20-slim AS web
+FROM node:22-slim AS web
 WORKDIR /workspace
 
 # (git is sometimes needed for dependencies)
@@ -28,7 +28,7 @@ COPY --from=web /workspace/node_modules ./node_modules
 COPY --from=web /workspace/package.json ./package.json
 
 # Required SDK components (adjust versions if different in your project)
-RUN yes | sdkmanager "platforms;android-35" "platform-tools" "build-tools;35.0.0" "cmdline-tools;latest" || true
+RUN yes | sdkmanager "platforms;android-36" "platform-tools" "build-tools;36.0.0" "cmdline-tools;latest" || true
 
 # Build
 WORKDIR /workspace/android

@@ -45,10 +45,8 @@ type BoardSync = {
 
 const CONFIRM_RELAYS = Math.min(2, RELAYS.length)
 const STALE_MS = 10_000
-const RETRY_MS = 15_000
+const RETRY_MS = 10_000
 const CHECK_TIMEOUT_MS = 8_000
-// Generous for 2G: a relay that doesn't answer in time counts as not having the snapshot
-const READBACK_TIMEOUT_MS = 10_000
 const STORAGE_PREFIX = 'lik:sync:'
 
 const startedAt = Date.now()
@@ -198,14 +196,12 @@ export const useSyncStore = defineStore('sync', () => {
     s.inflight++
     try {
       const results = await published.results
-      if (s.latestEventId !== eventId) return // a newer publish took over
       for (const r of results) s.relays[r.relay] = { state: 'sending' }
       // Let relays index the event before asking for it
       await sleep(500)
       const okRelays = results.filter((r) => r.ok).map((r) => r.relay)
       const dTag = (published.event.tags || []).find((t: string[]) => t[0] === 'd')?.[1] || ''
-      const served = okRelays.length ? await fetchPREPerRelay(dTag, [published.event.pubkey], okRelays, READBACK_TIMEOUT_MS) : {}
-      if (s.latestEventId !== eventId) return // a newer publish took over
+      const served = okRelays.length ? await fetchPREPerRelay(dTag, [published.event.pubkey], okRelays) : {}
       let confirmed = 0
       for (const r of results) {
         const got = served[r.relay]
