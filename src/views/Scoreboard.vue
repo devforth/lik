@@ -121,7 +121,12 @@
                       <Button variant="outline" size="icon" class="h-8 w-8" :disabled="!canEdit" @click="changeScore(cat.key, p.id, -1)" aria-label="Decrement">
                         <ChevronDown class="h-4 w-4" />
                       </Button>
-                      <div class="min-w-[3ch] text-center tabular-nums">{{ scoreFor(cat.value, p.id) }}</div>
+                      <div class="relative min-w-[3ch] text-center tabular-nums">
+                        {{ scoreFor(cat.value, p.id) }}
+                        <span v-if="isCellUnsent(cat.key, p.id)" class="absolute -top-0.5 -right-1.5 size-[7px] rounded-full bg-amber-600">
+                          <span class="sr-only">not sent yet</span>
+                        </span>
+                      </div>
                       <Button variant="outline" size="icon" class="h-8 w-8" :disabled="!canEdit" @click="changeScore(cat.key, p.id, 1)" aria-label="Increment">
                         <ChevronUp class="h-4 w-4" />
                       </Button>
@@ -299,6 +304,7 @@ import {
 import { Capacitor } from '@capacitor/core'
 import { useBackupReminderStore } from '@/stores/backupReminder'
 import { useLogNotifyStore } from '@/stores/logNotify'
+import { useSyncStore } from '@/stores/sync'
 
 const route = useRoute()
 const router = useRouter()
@@ -641,6 +647,15 @@ const categoriesList = computed(() => {
     })
 })
 
+// Cells whose score or star has not reached the relays; marked only once sending is overdue, not on every tap
+const sync = useSyncStore()
+const syncStatus = computed(() => sync.statusFor(id.value))
+function isCellUnsent(categoryKey: string, participantId: string): boolean {
+  const s = syncStatus.value
+  if (!s || (s.state !== 'pending' && s.state !== 'offline')) return false
+  return s.cells.has(`${categoryKey}|${participantId}`)
+}
+
 function scoreFor(cat: any, participantId: string): number {
   const p = Number((cat?.state?.P || {})[participantId] || 0)
   const n = Number((cat?.state?.N || {})[participantId] || 0)
@@ -788,19 +803,11 @@ onMounted(async () => {
   // Web fallback
   onVis = () => { if (document.visibilityState === 'visible') onBecameActive() }
   document.addEventListener('visibilitychange', onVis)
-  // Capacitor app state
-  ;(async () => {
-    try {
-      if (Capacitor?.isNativePlatform?.()) {
-          const capApp = '@capacitor/app'
-          const { App } = await import(/* @vite-ignore */ capApp as any)
-          const listener = await App.addListener('appStateChange', ({ isActive }: { isActive: boolean }) => {
-          if (isActive) onBecameActive()
-        })
-        capRemove = () => { try { listener.remove() } catch {} }
-      }
-    } catch {}
-  })()
+  // Capacitor dispatches a document 'resume' event when the Android activity resumes
+  if (Capacitor?.isNativePlatform?.()) {
+    document.addEventListener('resume', onBecameActive)
+    capRemove = () => document.removeEventListener('resume', onBecameActive)
+  }
 })
 
 onBeforeUnmount(() => {

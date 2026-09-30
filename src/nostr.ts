@@ -3,28 +3,150 @@
 // - exposes nostrSubscribeTag(tag, onEvent?) => unsubscribe
 // - exposes send(pubkey, privkey, kind, content, tags?) => Promise<void>
 
-import { SimplePool } from 'nostr-tools/pool'
-import type { EventTemplate } from 'nostr-tools'
+import { SimplePool, type SubCloser } from 'nostr-tools/pool'
+import type { EventTemplate, Filter } from 'nostr-tools'
 import { finalizeEvent } from 'nostr-tools'
-import { hexToBytes } from 'nostr-tools/utils'
+import { hexToBytes, normalizeURL } from 'nostr-tools/utils'
 import { canonicalJSONStringify, sha256Hex, computeMetadataHash } from '@/lib/utils'
 
 export type NostrEvent = any
 
-// Three popular, free, public relays
+// Free public relays that accept kind 0/1/30078 from fresh keys, survive bursts of publishes
+// and return the latest event on a fresh connection (probed 2026-09-30).
+// Not used: relay.damus.io (answers OK but stores nothing for new keys, bans on bursts),
+// nostr.oxtr.dev (rate-limits bursts), offchain.pub / nostr.bitcoiner.social (web-of-trust only).
 export const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://nostr.mom',
   'wss://relay.nostr.net',
+  'wss://nos.lol',
   'wss://relay.primal.net',
-  
+  'wss://nostr.mom',
+  'wss://nostr.sathoarder.com',
+  'wss://nostr-01.yakihonne.com',
 ]
 
-// Shared pool instance for the whole app
-const pool = new SimplePool()
+// nostr-tools gives a relay 4.4 s to connect and 4.4 s to answer a publish; on 2G that fails every time
+const RELAY_TIMEOUT_MS = 15_000
+
+class SlowNetworkPool extends SimplePool {
+  async ensureRelay(url: string, params?: { connectionTimeout?: number }) {
+    try {
+      const relay = await super.ensureRelay(url, { connectionTimeout: params?.connectionTimeout ?? RELAY_TIMEOUT_MS })
+      relay.publishTimeout = RELAY_TIMEOUT_MS
+      return relay
+    } catch (e) {
+      // nostr-tools keeps a relay whose socket failed before opening, with the rejected connection cached,
+      // so every later publish/subscribe fails instantly; drop it so the next attempt dials again
+      const key = normalizeURL(url)
+      const relay = this.relays.get(key)
+      if (relay && !relay.connected) {
+        relay.close()
+        this.relays.delete(key)
+      }
+      throw e
+    }
+  }
+}
+
+// Shared pool instance for the whole app; ping detects sockets that died without a close event
+const pool = new SlowNetworkPool({ enablePing: true })
 
 // Keep local refs to open subscriptions by key for optional housekeeping
 const activeSubs = new Map<string, { close: () => void }>()
+
+// Per-relay pieces of live subscriptions, so reconnectRelays() can reopen them right away
+const liveRelaySubs = new Set<{ reopen: () => void }>()
+
+/**
+ * Long-lived subscription that survives dropped connections: every relay gets its own
+ * subscription which is reopened (with backoff) whenever that relay closes it.
+ * @returns unsubscribe function
+ */
+export function subscribeLive(
+  filters: Filter[],
+  onEvent: (event: NostrEvent, relay: string) => void,
+  opts: { relays?: string[]; onEose?: (relay: string) => void } = {},
+) {
+  const relays = opts.relays ?? RELAYS
+  let stopped = false
+  const parts = relays.map((relay) => {
+    let sub: SubCloser | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let attempt = 0
+    let openedAt = 0
+    const open = () => {
+      timer = null
+      if (stopped) return
+      openedAt = Date.now()
+      sub = pool.subscribeMany([relay], filters, {
+        onevent: (evt) => onEvent(evt, relay),
+        oneose: () => opts.onEose?.(relay),
+        onclose: (reasons) => {
+          if (stopped) return
+          // A subscription that lived a while was healthy; start backoff from scratch
+          if (Date.now() - openedAt > 30_000) attempt = 0
+          const delay = Math.min(60_000, 500 * 2 ** attempt++)
+          console.info(`[nostr] ${relay} closed subscription (${reasons.join(', ')}), reopening in ${delay}ms`)
+          timer = setTimeout(open, delay)
+        },
+      })
+    }
+    const part = {
+      reopen: () => {
+        if (stopped) return
+        if (timer) clearTimeout(timer)
+        attempt = 0
+        open()
+      },
+      close: () => {
+        if (timer) clearTimeout(timer)
+        liveRelaySubs.delete(part)
+        try { sub?.close() } catch { /* noop */ }
+      },
+    }
+    liveRelaySubs.add(part)
+    open()
+    return part
+  })
+  return () => {
+    stopped = true
+    for (const p of parts) p.close()
+  }
+}
+
+/** Drop every relay socket and reopen live subscriptions on fresh connections. */
+let lastReconnectAt = 0
+export function reconnectRelays() {
+  // 'online' can fire twice in a row; a second reset would kill publishes on the fresh sockets
+  if (Date.now() - lastReconnectAt < 3000) return
+  lastReconnectAt = Date.now()
+  console.info('[nostr] reconnecting relays')
+  // Closing sockets fires onclose of live subscriptions synchronously; reopen() then cancels their backoff timers
+  pool.destroy()
+  for (const p of liveRelaySubs) p.reopen()
+}
+
+// Android WebView keeps sockets that died while the app was in background (no close event is fired),
+// so after a long pause start over with fresh connections instead of waiting for ping timeouts.
+const STALE_AFTER_HIDDEN_MS = 15_000
+let hiddenAt = 0
+function onAppHidden() {
+  if (!hiddenAt) hiddenAt = Date.now()
+}
+function onAppVisible() {
+  if (hiddenAt && Date.now() - hiddenAt > STALE_AFTER_HIDDEN_MS) reconnectRelays()
+  hiddenAt = 0
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') onAppHidden()
+    else onAppVisible()
+  })
+  // Capacitor dispatches these on Android activity pause/resume
+  document.addEventListener('pause', onAppHidden)
+  document.addEventListener('resume', onAppVisible)
+  // Network changed (e.g. Wi-Fi -> mobile): old sockets are dead
+  window.addEventListener('online', reconnectRelays)
+}
 
 // Debounce configuration for publish calls
 export const RELAY_DEBOUNCE_SEC: number = Number((import.meta as any)?.env?.VITE_RELAY_DEBOUNCE_SEC ?? 0.5)
@@ -40,12 +162,21 @@ type SendArgs = {
   relays: string[]
 }
 
+/** Relay answer to one published event */
+export type PublishResult = { relay: string; ok: boolean; reason: string }
+/** What a (debounced) send actually published: the signed event and per-relay answers */
+export type Published = { event: NostrEvent; results: Promise<PublishResult[]> }
+
 type DebounceEntry = {
   timeout: ReturnType<typeof setTimeout>
-  resolvers: Array<(v: void) => void>
+  resolvers: Array<(v: Published | null) => void>
 }
 
 const sendDebounceMap = new Map<string, DebounceEntry>()
+
+// Relays keep one replaceable event per key and reject a replacement with the same created_at
+// unless its id sorts lower ("replaced: have newer event"), so never reuse a second for a key.
+const lastCreatedAt = new Map<string, number>()
 
 function serializeTags(tags: string[][] = []): string {
   // Join inner arrays by unit-separator and outer by record-separator to avoid collisions
@@ -76,25 +207,19 @@ export function nostrSubscribeTag(tag: string, onEvent: (event: NostrEvent, rela
     try { activeSubs.get(key)?.close?.() } catch { /* noop */ }
     activeSubs.delete(key)
   }
-  const sub = pool.subscribeMany(
-    RELAYS,
+  const unsub = subscribeLive(
     [
       // Filter by tag; don't constrain kind to catch any custom usage
       { '#t': [String(tag)] },
     ],
-    {
-      onevent: (evt) => {
-        console.log('💧 [nostr] event', { tag, evt })
-        onEvent(evt)
-      },
-      oneose: () => {
-        // End-of-stored-events marker from relays; keep subscription open for future events
-  },
-    }
+    (evt, relay) => {
+      console.log('💧 [nostr] event', { tag, evt })
+      onEvent(evt, relay)
+    },
   )
-  activeSubs.set(key, sub)
+  activeSubs.set(key, { close: unsub })
   return () => {
-    try { sub.close() } finally { activeSubs.delete(key) }
+    try { unsub() } finally { activeSubs.delete(key) }
   }
 }
 
@@ -122,30 +247,24 @@ export function subscribeProfiles(
     try { activeSubs.get(key)?.close?.() } catch {}
     activeSubs.delete(key)
   }
-  const sub = pool.subscribeMany(
-    RELAYS,
+  const unsub = subscribeLive(
     [
       {
         kinds: [0],
         authors: authors.map(String),
       },
     ],
-    {
-      onevent: (evt) => {
-        const pk = String(evt?.pubkey || '')
-        if (!pk) return
-        let obj: any = {}
-        try { obj = JSON.parse(String(evt.content || '{}')) } catch { obj = {} }
-        onProfile(pk, obj, evt)
-      },
-      oneose: () => {
-        // keep it open
-      },
-    }
+    (evt) => {
+      const pk = String(evt?.pubkey || '')
+      if (!pk) return
+      let obj: any = {}
+      try { obj = JSON.parse(String(evt.content || '{}')) } catch { obj = {} }
+      onProfile(pk, obj, evt)
+    },
   )
-  activeSubs.set(key, sub)
+  activeSubs.set(key, { close: unsub })
   return () => {
-    try { sub.close() } finally { activeSubs.delete(key) }
+    try { unsub() } finally { activeSubs.delete(key) }
   }
 }
 
@@ -225,11 +344,13 @@ export async function send(
   const latestArgs: SendArgs = { pubkeyHex, privkeyHex, kind, content, tags, originalContentForDbg, relays }
 
   // Inner function that actually performs the publish
-  const doPublish = (args: SendArgs) => {
+  const doPublish = (args: SendArgs): Published | null => {
     try {
+      const createdAt = Math.max(Math.floor(Date.now() / 1000), (lastCreatedAt.get(key) ?? 0) + 1)
+      lastCreatedAt.set(key, createdAt)
       const evt: EventTemplate = {
         kind: Number(args.kind),
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: createdAt,
         tags: Array.isArray(args.tags) ? args.tags : [],
         content: String(args.content ?? ''),
       }
@@ -238,17 +359,23 @@ export async function send(
       const rels = args.relays && args.relays.length ? args.relays : RELAYS
       const signed = finalizeEvent({ ...evt }, sk)
       const pubs = toPromises(pool.publish(rels, signed) as any)
-      // Fire-and-forget: log failures but don't block UI
-      for (const p of pubs) {
-        p.catch((e: any) => console.warn('[nostr] publish error:', e?.message ?? e))
-      }
+      // Don't block UI: callers that care (sync status) await per-relay results
+      const results = Promise.all(pubs.map((p, i) => p.then(
+        (reason: any) => ({ relay: rels[i], ok: true, reason: String(reason ?? '') }),
+        (e: any) => {
+          console.warn('[nostr] publish error:', rels[i], e?.message ?? e)
+          return { relay: rels[i], ok: false, reason: String(e?.message ?? e) }
+        },
+      )))
+      return { event: signed, results }
     } catch (e) {
       console.warn('[nostr] send failed', e)
+      return null
     }
   }
 
   // Return a promise that resolves when the debounced publish fires
-  return new Promise<void>((resolve) => {
+  return new Promise<Published | null>((resolve) => {
     const existing = sendDebounceMap.get(key)
     if (existing) {
       console.log(`[nostr] 🐢 canceling on key ${key}`);
@@ -257,12 +384,13 @@ export async function send(
       existing.timeout = setTimeout(() => {
         const entry = sendDebounceMap.get(key)
         if (!entry) return
+        let published: Published | null = null
         try {
-          doPublish(latestArgs)
+          published = doPublish(latestArgs)
         } finally {
           sendDebounceMap.delete(key)
           for (const res of entry.resolvers) {
-            res()
+            res(published)
           }
         }
       }, RELAY_DEBOUNCE_MS)
@@ -272,11 +400,12 @@ export async function send(
       const timeout = setTimeout(() => {
         const entry = sendDebounceMap.get(key)
         if (!entry) return
+        let published: Published | null = null
         try {
-          doPublish(latestArgs)
+          published = doPublish(latestArgs)
         } finally {
           sendDebounceMap.delete(key)
-          for (const res of entry.resolvers) res()
+          for (const res of entry.resolvers) res(published)
         }
       }, RELAY_DEBOUNCE_MS)
       sendDebounceMap.set(key, {
@@ -534,12 +663,58 @@ export async function fetchLatestPREByDTag(
   return { event: latest, relay: latestRelay }
 }
 
+/**
+ * Ask every relay separately for the newest PRE with this d-tag.
+ * Per relay: the event, null when the relay answered without one, undefined when it did not answer.
+ */
+export async function fetchPREPerRelay(
+  dTag: string,
+  authors: string[],
+  relays: string[] = RELAYS,
+  timeoutMs = 4000,
+): Promise<Record<string, NostrEvent | null | undefined>> {
+  const results: Record<string, NostrEvent | null | undefined> = {}
+  await Promise.all(
+    relays.map((relay) =>
+      new Promise<void>((resolve) => {
+        let latest: NostrEvent | null = null
+        let closedReason = ''
+        let done = false
+        const finish = (answered: boolean) => {
+          if (done) return
+          done = true
+          clearTimeout(timer)
+          results[relay] = answered ? latest : undefined
+          try { sub.close() } catch {}
+          resolve()
+        }
+        const sub = pool.subscribeMany(
+          [relay],
+          [{ kinds: [KIND_PRE], '#d': [String(dTag)], authors: authors.map(String) }],
+          {
+            onevent: (evt) => {
+              if (!latest || Number(evt?.created_at || 0) > Number(latest.created_at || 0)) latest = evt
+            },
+            // A failed connection reports EOSE right before onclose, so decide once both have run
+            oneose: () => queueMicrotask(() => finish(!closedReason)),
+            onclose: (reasons) => { closedReason = reasons.join(', ') || 'closed' },
+          }
+        )
+        const timer = setTimeout(() => finish(false), timeoutMs)
+      })
+    )
+  )
+  return results
+}
+
 // Re-export helpers for convenience/compat with previous imports
 export { canonicalJSONStringify, sha256Hex, computeMetadataHash } from '@/lib/utils'
 
 export default {
   RELAYS,
   nostrSubscribeTag,
+  subscribeLive,
+  reconnectRelays,
   subscribeProfiles,
   send,
   sendPRE,
@@ -552,5 +727,6 @@ export default {
   getPREHashPerRelay,
   publishPREToRelays,
   fetchLatestPREByDTag,
+  fetchPREPerRelay,
   fetchLatestProfile,
 }

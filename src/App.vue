@@ -88,6 +88,7 @@
             <WifiOff class="h-5 w-5" />
             <span class="text-sm font-medium">Offline</span>
           </div>
+          <SyncIndicator />
         </div>
   <RouterView />
   <TopLogNotify />
@@ -118,6 +119,7 @@ import { Switch } from '@/components/ui/switch'
 import { useTheme } from './theme'
 import BackupReminder from '@/components/BackupReminder.vue'
 import TopLogNotify from '@/components/TopLogNotify.vue'
+import SyncIndicator from '@/components/SyncIndicator.vue'
 
 
 const scoreboardsStore = useScoreboardsStore()

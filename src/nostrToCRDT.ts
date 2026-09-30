@@ -1,16 +1,15 @@
 // Bridge between Nostr and CRDT: subscribe to PRE for board snapshots and merge locally.
 
-import { SimplePool } from 'nostr-tools/pool'
 import type { Filter } from 'nostr-tools'
-import { RELAYS, sendPRE, KIND_PRE, RELAY_DEBOUNCE_SEC } from '@/nostr'
+import { subscribeLive, sendPRE, KIND_PRE, RELAY_DEBOUNCE_SEC } from '@/nostr'
 import { canonicalJSONStringify } from '@/lib/utils'
 import shortId from '@/lib/utils'
 import { nowUtc } from '@/time-sync'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { ScoreboardCRDT, type EndingState, type LogEntry } from '@/crdt'
 import { useUserStore } from '@/stores/user'
+import { useSyncStore } from '@/stores/sync'
 
-const pool = new SimplePool()
 const active = new Map<string, { close: () => void }>()
 
 // Use the same debounce duration as relay publishes (ms)
@@ -95,7 +94,10 @@ function scheduleAggregatedLog(boardId: string, categoryId: string, participantI
   }
 }
 
-async function publishSnapshot(boardId: string, state: EndingState) {
+async function publishSnapshot(boardId: string, state: EndingState, localChange = true) {
+  const sync = useSyncStore()
+  if (localChange) sync.noteLocalChange(boardId)
+  sync.notePublishStart(boardId)
   try {
     const user = useUserStore()
     const p = await user.ensureUser()
@@ -118,9 +120,13 @@ async function publishSnapshot(boardId: string, state: EndingState) {
     const { aesEncryptToBase64 } = await import('@/lib/utils')
     const canon = canonicalJSONStringify(state)
     const enc = await aesEncryptToBase64(secret, canon)
-    await sendPRE(p.pubkeyHex, p.privkeyHex, tagD, enc, state)
+    const published = await sendPRE(p.pubkeyHex, p.privkeyHex, tagD, enc, state)
+    // Sync status: wait for relays and read the snapshot back (not awaited)
+    void sync.trackPublish(boardId, published)
   } catch (e) {
     // non-fatal
+  } finally {
+    sync.notePublishEnd(boardId)
   }
 }
 
@@ -162,32 +168,35 @@ export function subscribeToBoardCRDT(boardId: string, pubkeys: string[]) {
   const baseFilter: any = { kinds: [KIND_PRE] as any, '#d': [tagD], authors }
   const filters: Filter[] = [baseFilter]
   console.info('✏️ [nostr] Subscribing to CRDT PRE', { boardId, authors, filters })
-  const sub = pool.subscribeMany(RELAYS, filters as any, {
-  onevent: async (evt: any) => {
+  const sync = useSyncStore()
+  sync.startChecking(boardId)
+  const unsub = subscribeLive(filters, async (evt: any) => {
     console.info('💧 [nostr] PRE event CRDT', { evt })
-      try {
-        const content = String(evt?.content || '')
-        const store = useScoreboardsStore()
-        const board = store.items.find((s) => s.id === boardId)
-        if (!board) return
-        const secret = board.secret
-        if (!secret) return
-        const { aesDecryptFromBase64 } = await import('@/lib/utils')
-        const plain = await aesDecryptFromBase64(secret, content)
-        const remote: EndingState = JSON.parse(plain)
-        const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
-        const next = crdt.merge(remote)
-        // persist merged snapshot via store (IndexedDB)
-        void store.updateSnapshot(boardId, next)
-      } catch {}
-    },
-    oneose: () => {
-      // keep open
-    },
-  })
+    try {
+      const content = String(evt?.content || '')
+      const store = useScoreboardsStore()
+      const board = store.items.find((s) => s.id === boardId)
+      if (!board) return
+      const secret = board.secret
+      if (!secret) return
+      const { aesDecryptFromBase64 } = await import('@/lib/utils')
+      const plain = await aesDecryptFromBase64(secret, content)
+      const remote: EndingState = JSON.parse(plain)
+      const crdt = new ScoreboardCRDT(me, board.snapshot || undefined)
+      const next = crdt.merge(remote)
+      // persist merged snapshot via store (IndexedDB)
+      void store.updateSnapshot(boardId, next)
+      sync.noteReceived(boardId, remote, String(evt?.pubkey || ''), Number(evt?.created_at || 0))
+    } catch {}
+  }, { onEose: () => sync.noteEose(boardId) })
 
-  active.set(key, sub)
-  return () => { try { sub.close() } finally { active.delete(key) } }
+  active.set(key, { close: unsub })
+  return () => {
+    try { unsub() } finally {
+      active.delete(key)
+      sync.stopChecking(boardId)
+    }
+  }
 }
 
 /**
@@ -485,7 +494,7 @@ export async function republishCRDT(boardId: string): Promise<boolean> {
     const sb = store.items.find((s) => s.id === boardId)
     const snap = sb?.snapshot as EndingState | undefined
     if (!sb || !snap) return false
-    await publishSnapshot(boardId, snap)
+    await publishSnapshot(boardId, snap, false)
     return true
   } catch {
     return false

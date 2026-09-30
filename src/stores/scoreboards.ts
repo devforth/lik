@@ -1,13 +1,13 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { nowUtc } from '@/time-sync'
-import { nostrSubscribeTag, send as nostrSend, fetchLatestProfile, publishPREToRelays, fetchLatestPREByDTag, RELAYS } from '@/nostr'
-import { SimplePool } from 'nostr-tools/pool'
+import { nostrSubscribeTag, send as nostrSend, fetchLatestProfile, publishPREToRelays, fetchLatestPREByDTag, subscribeLive, RELAYS } from '@/nostr'
 import { useUserStore } from '@/stores/user'
 import { toast } from 'vue-sonner'
 import { useProfilesStore } from '@/stores/profiles'
 import { dbGetAll, dbBulkPut, dbDelete, dbPut } from '@/lib/idb'
 import { subscribeToBoardCRDT, appendLogEvent as appendLogEventCRDT, republishCRDT as republishCRDTCore } from '@/nostrToCRDT'
+import { useSyncStore } from '@/stores/sync'
 import type { LogEntry as CRDTLogEntry } from '@/crdt'
 import shortId from '@/lib/utils'
 
@@ -34,7 +34,6 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
   const crdtUnsubById = new Map<string, () => void>()
   // Board metadata PRE subscriptions by board id
   const brdUnsubById = new Map<string, () => void>()
-  const brdPool = new SimplePool()
   const KIND_PRE = 30078
   // last join requests per scoreboard id
   const lastRequests = ref<Record<string, JoinReq[]>>({})
@@ -187,6 +186,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     } catch (e) {
       console.warn('[scoreboards] delete failed', e)
     }
+    useSyncStore().forget(id)
 
     // participants are embedded; nothing else to cleanup
 
@@ -483,65 +483,60 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     if (ownerPubkey) {
       filter.authors = [String(ownerPubkey)]
     }
-    const sub = brdPool.subscribeMany(RELAYS, [filter], {
-      onevent: (evt: any) => {
-        try {
-          const content = String(evt?.content || '')
-          const sb = items.value.find((s) => s.id === boardId)
-          if (!sb || !sb.secret) return
-          // Defense-in-depth: ensure only owner-authored metadata is processed
-          const evtAuthor = String(evt?.pubkey || '')
-          if (ownerPubkey && evtAuthor && evtAuthor !== String(ownerPubkey)) return
-          // Decrypt metadata
-          const metaStrPromise = import('@/lib/utils').then(({ aesDecryptFromBase64 }) => aesDecryptFromBase64(String(sb.secret), content))
-          void (async () => {
+    const unsub = subscribeLive([filter], (evt: any) => {
+      try {
+        const content = String(evt?.content || '')
+        const sb = items.value.find((s) => s.id === boardId)
+        if (!sb || !sb.secret) return
+        // Defense-in-depth: ensure only owner-authored metadata is processed
+        const evtAuthor = String(evt?.pubkey || '')
+        if (ownerPubkey && evtAuthor && evtAuthor !== String(ownerPubkey)) return
+        // Decrypt metadata
+        const metaStrPromise = import('@/lib/utils').then(({ aesDecryptFromBase64 }) => aesDecryptFromBase64(String(sb.secret), content))
+        void (async () => {
+          try {
+            const metaStr = await metaStrPromise
+            const meta = JSON.parse(metaStr)
+            const sb2 = items.value.find((s) => s.id === boardId)
+            if (!sb2) return
+            // Validate owner consistency
+            const metaOwner = String(meta?.owner || '')
+            if (metaOwner && sb2.authorPubKey && metaOwner !== sb2.authorPubKey) {
+              // If we already know an owner and it differs from meta, ignore this event
+              return
+            }
+            // Update fields if changed
+            const nextName = String(meta?.name || sb2.name)
+            const nextOwner = String(meta?.owner || sb2.authorPubKey)
+            const nextEditors = Array.isArray(meta?.editors) ? meta.editors.map(String) : (sb2.editors || [])
+            let changed = false
+            if (sb2.name !== nextName) { sb2.name = nextName; changed = true }
+            if (sb2.authorPubKey !== nextOwner) { sb2.authorPubKey = nextOwner; changed = true }
+            const curEditors = (sb2.editors || []).slice().sort().join(',')
+            const newEditors = nextEditors.slice().sort().join(',')
+            const editorsChanged = curEditors !== newEditors
+            if (editorsChanged) { sb2.editors = nextEditors; changed = true }
+            if (changed) void saveAll(items.value)
+            // If editors list changed, attempt to (re)subscribe CRDT with the new authors list
+            if (editorsChanged) {
+              try { subscribeBoardCRDT(boardId) } catch {}
+            }
+            // Sync participants if present
             try {
-              const metaStr = await metaStrPromise
-              const meta = JSON.parse(metaStr)
-              const sb2 = items.value.find((s) => s.id === boardId)
-              if (!sb2) return
-              // Validate owner consistency
-              const metaOwner = String(meta?.owner || '')
-              if (metaOwner && sb2.authorPubKey && metaOwner !== sb2.authorPubKey) {
-                // If we already know an owner and it differs from meta, ignore this event
-                return
-              }
-              // Update fields if changed
-              const nextName = String(meta?.name || sb2.name)
-              const nextOwner = String(meta?.owner || sb2.authorPubKey)
-              const nextEditors = Array.isArray(meta?.editors) ? meta.editors.map(String) : (sb2.editors || [])
-              let changed = false
-              if (sb2.name !== nextName) { sb2.name = nextName; changed = true }
-              if (sb2.authorPubKey !== nextOwner) { sb2.authorPubKey = nextOwner; changed = true }
-              const curEditors = (sb2.editors || []).slice().sort().join(',')
-              const newEditors = nextEditors.slice().sort().join(',')
-              const editorsChanged = curEditors !== newEditors
-              if (editorsChanged) { sb2.editors = nextEditors; changed = true }
-              if (changed) void saveAll(items.value)
-              // If editors list changed, attempt to (re)subscribe CRDT with the new authors list
-              if (editorsChanged) {
-                try { subscribeBoardCRDT(boardId) } catch {}
-              }
-              // Sync participants if present
-              try {
-                if (Array.isArray(meta?.participants)) {
-                  const list = meta.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') }))
-                  const sb3 = items.value.find((s) => s.id === boardId)
-                  if (sb3) {
-                    sb3.participants = list
-                    void saveAll(items.value)
-                  }
+              if (Array.isArray(meta?.participants)) {
+                const list = meta.participants.map((p: any) => ({ id: String(p.id), name: String(p.name || '') }))
+                const sb3 = items.value.find((s) => s.id === boardId)
+                if (sb3) {
+                  sb3.participants = list
+                  void saveAll(items.value)
                 }
-              } catch {}
+              }
             } catch {}
-          })()
-        } catch {}
-      },
-      oneose: () => {
-        // keep open
-      },
+          } catch {}
+        })()
+      } catch {}
     })
-    brdUnsubById.set(boardId, () => { try { sub.close() } catch {} })
+    brdUnsubById.set(boardId, () => { try { unsub() } catch {} })
   }
 
   function unsubscribeBoardMeta(boardId: string) {
