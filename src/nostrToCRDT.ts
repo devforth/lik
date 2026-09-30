@@ -165,12 +165,11 @@ export function subscribeToBoardCRDT(boardId: string, pubkeys: string[]) {
     return () => {}
   }
 
-  const baseFilter: any = { kinds: [KIND_PRE] as any, '#d': [tagD], authors }
-  const filters: Filter[] = [baseFilter]
-  console.info('✏️ [nostr] Subscribing to CRDT PRE', { boardId, authors, filters })
+  const filter: Filter = { kinds: [KIND_PRE], '#d': [tagD], authors }
+  console.info('✏️ [nostr] Subscribing to CRDT PRE', { boardId, authors, filter })
   const sync = useSyncStore()
   sync.startChecking(boardId)
-  const unsub = subscribeLive(filters, async (evt: any) => {
+  const unsub = subscribeLive(filter, async (evt: any) => {
     console.info('💧 [nostr] PRE event CRDT', { evt })
     try {
       const content = String(evt?.content || '')

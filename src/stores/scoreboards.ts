@@ -483,7 +483,7 @@ export const useScoreboardsStore = defineStore('scoreboards', () => {
     if (ownerPubkey) {
       filter.authors = [String(ownerPubkey)]
     }
-    const unsub = subscribeLive([filter], (evt: any) => {
+    const unsub = subscribeLive(filter, (evt: any) => {
       try {
         const content = String(evt?.content || '')
         const sb = items.value.find((s) => s.id === boardId)

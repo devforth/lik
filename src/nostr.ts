@@ -6,7 +6,7 @@
 import { SimplePool, type SubCloser } from 'nostr-tools/pool'
 import type { EventTemplate, Filter } from 'nostr-tools'
 import { finalizeEvent } from 'nostr-tools'
-import { hexToBytes, normalizeURL } from 'nostr-tools/utils'
+import { hexToBytes } from 'nostr-tools/utils'
 import { canonicalJSONStringify, sha256Hex, computeMetadataHash } from '@/lib/utils'
 
 export type NostrEvent = any
@@ -24,26 +24,16 @@ export const RELAYS = [
   'wss://nostr-01.yakihonne.com',
 ]
 
-// nostr-tools gives a relay 4.4 s to connect and 4.4 s to answer a publish; on 2G that fails every time
+// nostr-tools gives a relay 3 s to connect and 4.4 s to answer a publish; on 2G that fails every time
 const RELAY_TIMEOUT_MS = 15_000
 
 class SlowNetworkPool extends SimplePool {
-  async ensureRelay(url: string, params?: { connectionTimeout?: number }) {
-    try {
-      const relay = await super.ensureRelay(url, { connectionTimeout: params?.connectionTimeout ?? RELAY_TIMEOUT_MS })
-      relay.publishTimeout = RELAY_TIMEOUT_MS
-      return relay
-    } catch (e) {
-      // nostr-tools keeps a relay whose socket failed before opening, with the rejected connection cached,
-      // so every later publish/subscribe fails instantly; drop it so the next attempt dials again
-      const key = normalizeURL(url)
-      const relay = this.relays.get(key)
-      if (relay && !relay.connected) {
-        relay.close()
-        this.relays.delete(key)
-      }
-      throw e
-    }
+  maxWaitForConnection = RELAY_TIMEOUT_MS
+
+  async ensureRelay(url: string, params?: { connectionTimeout?: number; abort?: AbortSignal }) {
+    const relay = await super.ensureRelay(url, params)
+    relay.publishTimeout = RELAY_TIMEOUT_MS
+    return relay
   }
 }
 
@@ -62,7 +52,7 @@ const liveRelaySubs = new Set<{ reopen: () => void }>()
  * @returns unsubscribe function
  */
 export function subscribeLive(
-  filters: Filter[],
+  filter: Filter,
   onEvent: (event: NostrEvent, relay: string) => void,
   opts: { relays?: string[]; onEose?: (relay: string) => void } = {},
 ) {
@@ -77,7 +67,7 @@ export function subscribeLive(
       timer = null
       if (stopped) return
       openedAt = Date.now()
-      sub = pool.subscribeMany([relay], filters, {
+      sub = pool.subscribeMany([relay], filter, {
         onevent: (evt) => onEvent(evt, relay),
         oneose: () => opts.onEose?.(relay),
         onclose: (reasons) => {
@@ -85,7 +75,7 @@ export function subscribeLive(
           // A subscription that lived a while was healthy; start backoff from scratch
           if (Date.now() - openedAt > 30_000) attempt = 0
           const delay = Math.min(60_000, 500 * 2 ** attempt++)
-          console.info(`[nostr] ${relay} closed subscription (${reasons.join(', ')}), reopening in ${delay}ms`)
+          console.info(`[nostr] ${relay} closed subscription (${reasons.map((r) => r.reason).join(', ')}), reopening in ${delay}ms`)
           timer = setTimeout(open, delay)
         },
       })
@@ -208,10 +198,8 @@ export function nostrSubscribeTag(tag: string, onEvent: (event: NostrEvent, rela
     activeSubs.delete(key)
   }
   const unsub = subscribeLive(
-    [
-      // Filter by tag; don't constrain kind to catch any custom usage
-      { '#t': [String(tag)] },
-    ],
+    // Filter by tag; don't constrain kind to catch any custom usage
+    { '#t': [String(tag)] },
     (evt, relay) => {
       console.log('💧 [nostr] event', { tag, evt })
       onEvent(evt, relay)
@@ -224,15 +212,6 @@ export function nostrSubscribeTag(tag: string, onEvent: (event: NostrEvent, rela
 }
 
 // All PoW/NIP-13 mining logic removed intentionally.
-
-/** Normalize publish return to an array of promises for easier awaiting. */
-function toPromises(x: any): Promise<any>[] {
-  if (!x) return []
-  if (Array.isArray(x)) return x
-  if (typeof x.then === 'function') return [x]
-  if (typeof x[Symbol.iterator] === 'function') return Array.from(x)
-  return []
-}
 
 /**
  * Subscribe to profile events (kind:0) for a set of authors. Keeps the subscription open.
@@ -248,12 +227,10 @@ export function subscribeProfiles(
     activeSubs.delete(key)
   }
   const unsub = subscribeLive(
-    [
-      {
-        kinds: [0],
-        authors: authors.map(String),
-      },
-    ],
+    {
+      kinds: [0],
+      authors: authors.map(String),
+    },
     (evt) => {
       const pk = String(evt?.pubkey || '')
       if (!pk) return
@@ -282,12 +259,10 @@ export async function fetchLatestProfile(pubkeyHex: string, timeoutMs = 3000): P
         let resolved = false
         const sub = pool.subscribeMany(
           [relay],
-          [
-            {
-              kinds: [0],
-              authors,
-            },
-          ],
+          {
+            kinds: [0],
+            authors,
+          },
           {
             onevent: (evt) => {
               const ts = Number(evt?.created_at || 0)
@@ -358,7 +333,7 @@ export async function send(
       const sk = hexToBytes(String(args.privkeyHex))
       const rels = args.relays && args.relays.length ? args.relays : RELAYS
       const signed = finalizeEvent({ ...evt }, sk)
-      const pubs = toPromises(pool.publish(rels, signed) as any)
+      const pubs = pool.publish(rels, signed)
       // Don't block UI: callers that care (sync status) await per-relay results
       const results = Promise.all(pubs.map((p, i) => p.then(
         (reason: any) => ({ relay: rels[i], ok: true, reason: String(reason ?? '') }),
@@ -471,13 +446,11 @@ export async function getProfileHashPerRelay(
         console.info('✏️ [nostr] fetching profile hash for', pubkeyHex, 'from relay', relay);
         const sub = pool.subscribeMany(
           [relay],
-          [
-            {
-              kinds: [0],
-              authors: [String(pubkeyHex)],
-              // get all, we'll pick latest at EOSE; many relays honor limit but order isn't guaranteed
-            },
-          ],
+          {
+            kinds: [0],
+            authors: [String(pubkeyHex)],
+            // get all, we'll pick latest at EOSE; many relays honor limit but order isn't guaranteed
+          },
           {
             onevent: (evt) => {
               if (!latest || Number(evt?.created_at || 0) > Number(latest.created_at || 0)) {
@@ -546,7 +519,7 @@ export async function getPREHashPerRelay(
         if (authors && authors.length) filter.authors = authors.map(String)
         const sub = pool.subscribeMany(
           [relay],
-          [ filter ],
+          filter,
           {
             onevent: (evt) => {
               if (!latest || Number(evt?.created_at || 0) > Number(latest?.created_at || 0)) latest = evt
@@ -621,7 +594,7 @@ export async function fetchLatestPREByDTag(
         let resolved = false
         const sub = pool.subscribeMany(
           [relay],
-          [ (() => { const f: any = { kinds: [KIND_PRE], '#d': [String(dTag)] }; if (authors && authors.length) f.authors = authors.map(String); return f })() ],
+          (() => { const f: any = { kinds: [KIND_PRE], '#d': [String(dTag)] }; if (authors && authors.length) f.authors = authors.map(String); return f })(),
           {
             onevent: (evt) => {
               const curTs = Number(evt?.created_at || 0)
@@ -690,14 +663,14 @@ export async function fetchPREPerRelay(
         }
         const sub = pool.subscribeMany(
           [relay],
-          [{ kinds: [KIND_PRE], '#d': [String(dTag)], authors: authors.map(String) }],
+          { kinds: [KIND_PRE], '#d': [String(dTag)], authors: authors.map(String) },
           {
             onevent: (evt) => {
               if (!latest || Number(evt?.created_at || 0) > Number(latest.created_at || 0)) latest = evt
             },
             // A failed connection reports EOSE right before onclose, so decide once both have run
             oneose: () => queueMicrotask(() => finish(!closedReason)),
-            onclose: (reasons) => { closedReason = reasons.join(', ') || 'closed' },
+            onclose: (reasons) => { closedReason = reasons.map((r) => r.reason).join(', ') || 'closed' },
           }
         )
         const timer = setTimeout(() => finish(false), timeoutMs)

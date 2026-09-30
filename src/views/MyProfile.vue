@@ -217,7 +217,7 @@ async function onImport() {
     const brdIds: string[] = []
     await Promise.all(RELAYS.map((relay) => new Promise<void>((resolve) => {
       let resolved = false
-      const sub = pool.subscribeMany([relay], [ { kinds: [30078], authors: [pkHex] } as any ], {
+      const sub = pool.subscribeMany([relay], { kinds: [30078], authors: [pkHex] }, {
         onevent: (evt: any) => {
           try {
             const tags: any[] = Array.isArray(evt?.tags) ? evt.tags : []

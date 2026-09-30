@@ -25,7 +25,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-vue-next": "^0.539.0",
-    "nostr-tools": "^2.16.2",
+    "nostr-tools": "^2.25.2",
     "pinia": "^3.0.3",
     "qrcode.vue": "^3.6.0",
     "reka-ui": "^2.4.1",
