@@ -131,9 +131,13 @@ Option A — Android Studio
 3) Open `android/` in Android Studio and run on device/emulator or assemble a release
 
 Option B — Docker one‑shot release build
-1) Ensure Docker is available
-2) Run the helper script: `build/build.sh`
-3) Find the `.aab` in `dist-android/`
+1) Ensure Docker and a JDK (`keytool`, `jarsigner`) are available
+2) Run the helper script: `AAB_PASS=xxxxxx build/build.sh`
+3) Find the signed `.aab` in `dist-android/` and upload it to Play Console
+
+`AAB_PASS` is the password of the upload keystore `build/my-release-key.jks` (git-ignored: keep a backup of the file and the password; store and key password must be the same).
+Without it the bundle stays unsigned and Play Console rejects it ("All uploaded bundles must be signed").
+Lost the password or the keystore? Play Console → App integrity → request an upload key reset.
 
 Play Store
 - Listing: https://play.google.com/store/apps/details?id=io.devforth.lik&hl=en
