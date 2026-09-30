@@ -88,10 +88,10 @@
             <WifiOff class="h-5 w-5" />
             <span class="text-sm font-medium">Offline</span>
           </div>
-          <SyncIndicator />
+          <!-- The open board puts its title, sync status and menu here -->
+          <div id="board-bar" class="contents"></div>
         </div>
   <RouterView />
-  <TopLogNotify />
         <BackupReminder />
         <Toaster class="pointer-events-auto" />
       </main>
@@ -118,8 +118,6 @@ import { ChevronUp, WifiOff, Moon, Sun } from '@lucide/vue'
 import { Switch } from '@/components/ui/switch'
 import { useTheme } from './theme'
 import BackupReminder from '@/components/BackupReminder.vue'
-import TopLogNotify from '@/components/TopLogNotify.vue'
-import SyncIndicator from '@/components/SyncIndicator.vue'
 
 
 const scoreboardsStore = useScoreboardsStore()

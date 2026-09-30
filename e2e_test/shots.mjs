@@ -15,7 +15,7 @@ const page = await ctx.newPage()
 page.on('pageerror', (e) => errors.push(e.message))
 page.on('console', (m) => { if (m.type() === 'error' && !/Time sync failed|Failed to load resource/.test(m.text())) errors.push('console: ' + m.text().slice(0, 200)) })
 
-const indicator = () => page.locator('main > div').first().locator('button').last()
+const indicator = () => page.getByRole('button', { name: /^(Synced|Sending…|Checking…|Not sent|On phone|\d+ on phone)/ })
 async function waitIndicator(re, ms = 30000) {
   const start = Date.now(); let last = ''
   while (Date.now() - start < ms) {
@@ -33,7 +33,7 @@ async function snap(name, extraMasks = []) {
   log('shot', name)
 }
 async function closeDrawer() { await page.keyboard.press('Escape'); await page.waitForTimeout(600) }
-async function scoreText(i) { return (await page.locator('td .tabular-nums').nth(i).innerText()).replace(/\s+/g, '') }
+async function scoreText(i) { return (await page.locator('main section .tabular-nums').nth(i).innerText()).replace(/\s+/g, '') }
 
 // Fixed nickname so names are the same in every run
 await page.goto(BASE + '/profile')
@@ -56,8 +56,8 @@ for (const name of ['Dishes', 'Homework']) {
   await page.waitForTimeout(400)
 }
 // Homework is newest -> on top. Scores: Bob +3/-1 in Homework, Alice +2, Dishes Bob +1
-const inc = (i) => page.getByRole('button', { name: 'Increment' }).nth(i).click()
-const dec = (i) => page.getByRole('button', { name: 'Decrement' }).nth(i).click()
+const inc = (i) => page.getByRole('button', { name: '+1' }).nth(i).click()
+const dec = (i) => page.getByRole('button', { name: '−1' }).nth(i).click()
 await inc(0); await inc(0); await inc(0); await dec(0)
 await inc(1); await inc(1)
 await inc(2)

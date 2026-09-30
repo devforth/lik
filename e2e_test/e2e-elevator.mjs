@@ -24,7 +24,7 @@ await page.routeWebSocket(/wss:\/\//, (ws) => {
   server.onMessage((m) => { if (!s.dead) ws.send(m) })
 })
 
-const indicator = () => page.locator('main > div').first().locator('button').last()
+const indicator = () => page.getByRole('button', { name: /^(Synced|Sending…|Checking…|Not sent|On phone|\d+ on phone)/ })
 async function waitIndicator(re, ms) {
   const start = Date.now(); let last = ''
   while (Date.now() - start < ms) {
@@ -48,7 +48,7 @@ log('before:', await waitIndicator(/Synced/, 30000))
 outage = true
 for (const s of sockets) s.dead = true
 log('outage starts,', sockets.length, 'sockets black-holed')
-await page.getByRole('button', { name: 'Increment' }).first().click()
+await page.getByRole('button', { name: '+1' }).first().click()
 log('in outage:', await waitIndicator(/Not sent/, 30000))
 await page.waitForTimeout(Math.max(0, OUTAGE_MS - 10000))
 

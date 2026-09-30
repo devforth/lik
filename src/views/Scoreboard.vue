@@ -11,21 +11,18 @@
   </div>
 
   <!-- Loaded state -->
-  <div v-else-if="ready && scoreboard" class="p-4 space-y-6 pb-[70px]">
-    <div class="flex items-start justify-between gap-2">
-      <div>
-        <h1 class="text-2xl font-semibold">{{ scoreboard?.name ?? 'Scoreboard' }}</h1>
-        <div v-if="ready && !canEdit" class="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">
-          <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
-          Read-only
-        </div>
+  <div v-else-if="ready && scoreboard" class="px-4 pt-1 pb-24 space-y-4">
+    <!-- Board title, sync status and menu live in the app's top bar -->
+    <Teleport defer to="#board-bar">
+      <div class="min-w-0 flex-1">
+        <h1 class="truncate text-lg font-bold">{{ scoreboard.name }}</h1>
+        <div v-if="!canEdit" class="text-xs text-muted-foreground">Read-only</div>
       </div>
-
-      <!-- Actions: kebab menu -->
+      <SyncIndicator />
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
-          <Button variant="ghost" size="icon" class="h-8 w-8">
-            <MoreVertical class="h-5 w-5" />
+          <Button variant="ghost" size="icon" class="size-11">
+            <MoreVertical class="size-5" />
             <span class="sr-only">Open menu</span>
           </Button>
         </DropdownMenuTrigger>
@@ -52,111 +49,79 @@
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </Teleport>
 
-    <!-- Scoreboard table -->
-    <div v-if="scoreboard" class="-mx-4 px-4">
-      <div class="overflow-x-auto relative">
-        <table class="w-full border-collapse table-fixed">
-          <thead>
-            <tr>
-              <th
-                v-for="p in participants"
-                :key="p.id"
-                class="px-2 py-2 text-center text-sm font-medium text-foreground border-b"
-                :style="{ minWidth: '40vw', width: '40vw' }"
-              >
-                <div class="flex items-center justify-center gap-2">
-                  <div class="truncate max-w-[28vw]">{{ p.name }}</div>
-                  <DropdownMenu v-if="isOwner">
-                    <DropdownMenuTrigger as-child>
-                      <Button variant="ghost" size="icon" class="h-7 w-7">
-                        <MoreVertical class="h-4 w-4" />
-                        <span class="sr-only">Open participant menu</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" class="w-40">
-                      <DropdownMenuItem @click="openRenameParticipant(p.id, p.name)">Rename</DropdownMenuItem>
-                      <DropdownMenuItem variant="destructive" @click="openDeleteParticipant(p.id, p.name)">Delete</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-for="cat in categoriesList" :key="cat.key">
-              <!-- Category name row -->
-              <tr>
-                <td :colspan="Math.min(2, participants.length)" class="pt-2 pb-1">
-                  <div class="flex items-center justify-between gap-2">
-                    <div class="text-sm font-semibold">{{ cat.value.name || 'Untitled category' }}</div>
-                    <DropdownMenu v-if="canEdit">
-                      <DropdownMenuTrigger as-child>
-                        <Button variant="ghost" size="icon" class="h-7 w-7">
-                          <MoreVertical class="h-4 w-4" />
-                          <span class="sr-only">Open category menu</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" class="w-40">
-                        <DropdownMenuItem @click="openRenameCategory(cat.key, cat.value.name || '')">
-                          <span>Rename</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem :disabled="!canMoveCategoryUp(cat.key)" @click="moveCategoryUp(cat.key)">
-                          <span>Move category up</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem variant="destructive" @click="openDeleteCategory(cat.key, cat.value.name || '')">
-                          <span>Delete</span>
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </td>
-              </tr>
-              <!-- Counters row -->
-              <tr>
-                <td v-for="p in participants" :key="p.id + ':' + cat.key" class="pb-4" :style="{ minWidth: '40vw', width: '40vw' }">
-                  <div class="flex flex-col items-center justify-center gap-2">
-                    <div class="flex items-center justify-center gap-3">
-                      <Button variant="outline" size="icon" class="h-8 w-8" :disabled="!canEdit" @click="changeScore(cat.key, p.id, -1)" aria-label="Decrement">
-                        <ChevronDown class="h-4 w-4" />
-                      </Button>
-                      <div class="relative min-w-[3ch] text-center tabular-nums">
-                        {{ scoreFor(cat.value, p.id) }}
-                        <span v-if="isCellUnsent(cat.key, p.id)" class="absolute -top-0.5 -right-1.5 size-[7px] rounded-full bg-amber-600">
-                          <span class="sr-only">not sent yet</span>
-                        </span>
-                      </div>
-                      <Button variant="outline" size="icon" class="h-8 w-8" :disabled="!canEdit" @click="changeScore(cat.key, p.id, 1)" aria-label="Increment">
-                        <ChevronUp class="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <!-- Priority toggle: star button below the score with debug number -->
-                    <div class="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        class="h-5 w-5 focus-visible:ring-0 focus-visible:ring-transparent focus-visible:border-inherit hover:transition-none"
-                        :class="hasPriority(cat.key, p.id)
-                          ? 'bg-primary text-primary-foreground border-primary hover:bg-primary hover:text-primary-foreground dark:bg-primary/30 dark:text-white dark:border-primary/40 dark:hover:bg-primary/40 dark:hover:text-white'
-                          : ''"
-                        :disabled="!canEdit"
-                        @click="togglePriority(cat.key, p.id)"
-                        aria-label="Toggle priority"
-                      >
-                        <Star class="h-2 w-2" :fill="hasPriority(cat.key, p.id) ? 'currentColor' : 'none'" />
-                      </Button>
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
+    <!-- Categories: one tile per participant -->
+    <section v-for="cat in categoriesList" :key="cat.key" class="space-y-2">
+      <div class="flex h-8 items-center justify-between">
+        <h2 class="text-base font-bold">{{ cat.value.name || 'Untitled category' }}</h2>
+        <DropdownMenu v-if="canEdit">
+          <DropdownMenuTrigger as-child>
+            <Button variant="ghost" size="icon" class="size-9 text-muted-foreground">
+              <MoreHorizontal class="size-[18px]" />
+              <span class="sr-only">Open category menu</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" class="w-40">
+            <DropdownMenuItem @click="openRenameCategory(cat.key, cat.value.name || '')">
+              <span>Rename</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem :disabled="!canMoveCategoryUp(cat.key)" @click="moveCategoryUp(cat.key)">
+              <span>Move category up</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" @click="openDeleteCategory(cat.key, cat.value.name || '')">
+              <span>Delete</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-    </div>
-
-
+      <div class="grid grid-cols-2 gap-2.5">
+        <div
+          v-for="(p, i) in participants"
+          :key="p.id + ':' + cat.key"
+          class="flex flex-col gap-1.5 rounded-[22px] p-3"
+          :class="tileColor(i).tile"
+        >
+          <div class="flex h-6 items-center justify-between">
+            <DropdownMenu v-if="isOwner">
+              <DropdownMenuTrigger class="truncate text-[13px] font-semibold">{{ p.name }}</DropdownMenuTrigger>
+              <DropdownMenuContent align="start" class="w-40">
+                <DropdownMenuItem @click="openRenameParticipant(p.id, p.name)">Rename</DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" @click="openDeleteParticipant(p.id, p.name)">Delete</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <span v-else class="truncate text-[13px] font-semibold">{{ p.name }}</span>
+            <button
+              class="-mr-1.5 flex size-8 items-center justify-center disabled:opacity-50"
+              :disabled="!canEdit"
+              aria-label="Toggle priority"
+              @click="togglePriority(cat.key, p.id)"
+            >
+              <Star class="size-4" :fill="hasPriority(cat.key, p.id) ? 'currentColor' : 'none'" />
+            </button>
+          </div>
+          <div class="flex items-start gap-1">
+            <span class="text-4xl leading-none font-extrabold tabular-nums">{{ scoreFor(cat.value, p.id) }}</span>
+            <span v-if="isCellUnsent(cat.key, p.id)" class="size-2 rounded-full bg-amber-600">
+              <span class="sr-only">not sent yet</span>
+            </span>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button
+              class="h-10 rounded-full bg-white/70 text-[15px] font-bold disabled:opacity-50 dark:bg-white/10"
+              :disabled="!canEdit"
+              @click="changeScore(cat.key, p.id, -1)"
+            >−1</button>
+            <button
+              class="h-10 rounded-full text-[15px] font-bold disabled:opacity-50"
+              :class="tileColor(i).plus"
+              :disabled="!canEdit"
+              @click="changeScore(cat.key, p.id, 1)"
+            >+1</button>
+          </div>
+        </div>
+      </div>
+    </section>
 
   <!-- Confirm delete drawer -->
   <ConfirmDeleteBoard v-model:open="drawerOpen" @confirm="confirmDelete" />
@@ -194,47 +159,35 @@
   </div>
 
   <!-- Loading skeleton state -->
-  <div v-else class="p-4 space-y-6 pb-[0px]">
-    <div class="flex items-start justify-between gap-2">
-      <div class="space-y-2 w-full max-w-screen-sm">
-        <Skeleton class="h-7 w-40" />
-        <Skeleton class="h-4 w-24" />
-      </div>
-      <Skeleton class="h-8 w-8 rounded-md" />
-    </div>
-
-    <div class="-mx-4 px-4">
-      <div class="overflow-x-auto relative">
-        <div class="min-w-full space-y-4">
-          <!-- Header row skeleton -->
-          <div class="flex gap-4">
-            <Skeleton class="h-6 w-[40vw]" />
-            <Skeleton class="h-6 w-[40vw]" />
-          </div>
-          <!-- A few rows skeleton -->
-          <div class="space-y-3">
-            <div v-for="i in 3" :key="i" class="flex gap-4 items-center">
-              <Skeleton class="h-10 w-[40vw]" />
-              <Skeleton class="h-10 w-[40vw]" />
-            </div>
-          </div>
-        </div>
+  <div v-else class="px-4 pt-1 space-y-4">
+    <div v-for="i in 2" :key="i" class="space-y-2">
+      <Skeleton class="h-6 w-28" />
+      <div class="grid grid-cols-2 gap-2.5">
+        <Skeleton class="h-[132px] rounded-[22px]" />
+        <Skeleton class="h-[132px] rounded-[22px]" />
       </div>
     </div>
   </div>
 
-  <!-- Floating create-category action -->
-  <div v-if="!notFound && canEdit" class="pointer-events-none">
-    <Button
-      variant="default"
-      size="icon"
-      class="pointer-events-auto fixed right-4 md:right-6 z-50 h-14 w-14 rounded-full shadow-lg"
-      :class="{ 'bottom-24': isOwner && myRequests.length, 'bottom-6': !(isOwner && myRequests.length) }"
+  <!-- Bottom bar: activity from other editors + add category -->
+  <div
+    v-if="!notFound"
+    class="fixed inset-x-4 z-40 flex items-center gap-2.5"
+    :class="isOwner && myRequests.length ? 'bottom-28' : 'bottom-6'"
+  >
+    <button
+      v-if="notify.current"
+      class="h-12 min-w-0 flex-1 truncate rounded-2xl bg-primary px-3.5 text-left text-[13px] text-primary-foreground"
+      @click="notify.dismiss()"
+    >{{ notify.current.message }}</button>
+    <button
+      v-if="canEdit"
+      class="ml-auto flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground"
       aria-label="Add category"
       @click="openCreateCategory"
     >
-      <Plus class="h-7 w-7" />
-    </Button>
+      <Plus class="size-6" />
+    </button>
   </div>
 
   <!-- Create category drawer -->
@@ -272,7 +225,7 @@ import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { useUserStore } from '@/stores/user'
-import { MoreVertical, Trash2, QrCode, Settings, Plus, ChevronUp, ChevronDown, Star } from '@lucide/vue'
+import { MoreVertical, MoreHorizontal, Trash2, QrCode, Settings, Plus, Star } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -305,6 +258,7 @@ import { Capacitor } from '@capacitor/core'
 import { useBackupReminderStore } from '@/stores/backupReminder'
 import { useLogNotifyStore } from '@/stores/logNotify'
 import { useSyncStore } from '@/stores/sync'
+import SyncIndicator from '@/components/SyncIndicator.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -654,6 +608,19 @@ function isCellUnsent(categoryKey: string, participantId: string): boolean {
   const s = syncStatus.value
   if (!s || (s.state !== 'pending' && s.state !== 'offline')) return false
   return s.cells.has(`${categoryKey}|${participantId}`)
+}
+
+// Tile colors by participant position; the ink keeps text contrast >= 4.5:1 on the tile in both themes
+const TILE_COLORS = [
+  { tile: 'bg-orange-100 text-orange-800 dark:bg-orange-400/15 dark:text-orange-300', plus: 'bg-orange-800 text-white dark:bg-orange-300 dark:text-orange-950' },
+  { tile: 'bg-sky-100 text-sky-800 dark:bg-sky-400/15 dark:text-sky-300', plus: 'bg-sky-800 text-white dark:bg-sky-300 dark:text-sky-950' },
+  { tile: 'bg-green-100 text-green-800 dark:bg-green-400/15 dark:text-green-300', plus: 'bg-green-800 text-white dark:bg-green-300 dark:text-green-950' },
+  { tile: 'bg-purple-100 text-purple-800 dark:bg-purple-400/15 dark:text-purple-300', plus: 'bg-purple-800 text-white dark:bg-purple-300 dark:text-purple-950' },
+  { tile: 'bg-pink-100 text-pink-800 dark:bg-pink-400/15 dark:text-pink-300', plus: 'bg-pink-800 text-white dark:bg-pink-300 dark:text-pink-950' },
+  { tile: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-400/15 dark:text-yellow-300', plus: 'bg-yellow-800 text-white dark:bg-yellow-300 dark:text-yellow-950' },
+]
+function tileColor(index: number) {
+  return TILE_COLORS[index % TILE_COLORS.length]
 }
 
 function scoreFor(cat: any, participantId: string): number {

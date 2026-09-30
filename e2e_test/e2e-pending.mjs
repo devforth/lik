@@ -11,7 +11,7 @@ const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, de
 const page = await ctx.newPage()
 page.on('console', (m) => { const t = m.text(); if (/reconnect|publish error|closed subscription/.test(t)) log('console:', t.slice(0, 140)) })
 page.on('pageerror', (e) => log('PAGEERROR', e.message))
-const indicator = () => page.locator('main > div').first().locator('button').last()
+const indicator = () => page.getByRole('button', { name: /^(Synced|Sending…|Checking…|Not sent|On phone|\d+ on phone)/ })
 async function waitIndicator(re, ms = 30000) {
   const start = Date.now(); let last = ''
   while (Date.now() - start < ms) {
@@ -37,7 +37,7 @@ log('start:', await waitIndicator(/Synced/, 30000))
 blocked = true
 await page.evaluate(() => window.dispatchEvent(new Event('online'))) // drop current sockets
 await page.waitForTimeout(3500)
-await page.getByRole('button', { name: 'Increment' }).first().click()
+await page.getByRole('button', { name: '+1' }).first().click()
 log('after tap:', await waitIndicator(/Sending/, 3000))
 log('stale:', await waitIndicator(/Not sent/, 20000))
 log('dots:', await page.locator('text=not sent yet').count())
@@ -46,11 +46,14 @@ await indicator().click()
 await page.waitForTimeout(800)
 await page.screenshot({ path: `${OUT}/e2e-6-pending-sheet.png` })
 log('sheet:\n' + (await page.locator('[role=dialog]').innerText()))
+await page.keyboard.press('Escape') // an open sheet hides the page (and the indicator) from the accessibility tree
+await page.waitForTimeout(500)
 
 // Relays come back; the automatic retry (every 15 s) should confirm without touching anything
 blocked = false
 log('unblocked')
 log('recovered:', await waitIndicator(/Synced/, 40000))
+await indicator().click()
 await page.waitForTimeout(600)
 log('sheet after:\n' + (await page.locator('[role=dialog]').innerText().catch(() => '(closed)')))
 await browser.close()
