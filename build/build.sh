@@ -6,35 +6,17 @@ echo "🚀 Building Capacitor Android (Docker multi-stage)..."
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-IMAGE_NAME="lik-android:latest"
 OUT_DIR="$PROJECT_ROOT/dist-android"
 
-echo "🔨 docker build..."
-docker build -f build/Dockerfile -t "$IMAGE_NAME" .
-
-echo "📦 Extracting AAB..."
+# Clean old artifacts to avoid uploading a stale bundle
 mkdir -p "$OUT_DIR"
-# Clean old artifacts to avoid confusion
-rm -f "$OUT_DIR"/*.aab "$OUT_DIR"/*.apk 2>/dev/null || true
-CID=$(docker create "$IMAGE_NAME")
+rm -f "$OUT_DIR"/*.aab
 
-# Standard path for release AAB
-docker cp "$CID":/workspace/android/app/build/outputs/bundle/release/. "$OUT_DIR" 2>/dev/null || true
-
-# Fallback: extract any *.aab from android/
-if ! ls "$OUT_DIR"/*.aab >/dev/null 2>&1; then
-  echo "🔎 Fallback: search for AABs..."
-  docker cp "$CID":/workspace/android /tmp/_android_copy
-  find /tmp/_android_copy -name '*.aab' -exec cp {} "$OUT_DIR"/ \;
-  rm -rf /tmp/_android_copy
-fi
-
-docker rm "$CID" >/dev/null
+echo "🔨 docker build..."
+docker build -f build/Dockerfile --target aab --output "type=local,dest=$OUT_DIR" .
 
 echo "✅ Done. AABs:"
-# Remove any debug artifacts to avoid accidental uploads
-rm -f "$OUT_DIR"/*-debug.* 2>/dev/null || true
-ls -la "$OUT_DIR" || echo "No AAB files found"
+ls -la "$OUT_DIR"/*.aab
 
 # --- Optional: sign newest AAB if AAB_PASS is set ---
 if [[ -n "${AAB_PASS:-}" ]]; then
