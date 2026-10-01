@@ -63,6 +63,19 @@ export function shortId(): string {
 
 export default shortId
 
+/**
+ * Uniform integer in [0, n) from the platform CSPRNG (crypto.getRandomValues).
+ * Draws past the last full multiple of n are redrawn, so every result has probability exactly 1/n
+ * (a plain `% n` would favour small results).
+ */
+export function secureRandomIndex(n: number): number {
+  const limit = Math.floor(2 ** 32 / n) * n
+  const buf = new Uint32Array(1)
+  do crypto.getRandomValues(buf)
+  while (buf[0] >= limit)
+  return buf[0] % n
+}
+
 // ---- AES-GCM helpers for app encryption ----
 
 function hexToBytes(hex: string): Uint8Array {

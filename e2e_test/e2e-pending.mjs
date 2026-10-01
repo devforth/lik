@@ -37,7 +37,7 @@ log('start:', await waitIndicator(/Synced/, 30000))
 blocked = true
 await page.evaluate(() => window.dispatchEvent(new Event('online'))) // drop current sockets
 await page.waitForTimeout(3500)
-await page.getByRole('button', { name: '+1' }).first().click()
+await page.getByRole('button', { name: 'Increment' }).first().click()
 log('after tap:', await waitIndicator(/Sending/, 3000))
 log('stale:', await waitIndicator(/Not sent/, 20000))
 log('dots:', await page.locator('text=not sent yet').count())

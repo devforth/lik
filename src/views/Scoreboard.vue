@@ -77,47 +77,50 @@
       </div>
       <div class="grid grid-cols-2 gap-2.5">
         <div
-          v-for="(p, i) in participants"
-          :key="p.id + ':' + cat.key"
+          v-for="t in tilesFor(cat.key)"
+          :key="t.p.id + ':' + cat.key"
           class="flex flex-col gap-1.5 rounded-[22px] p-3"
-          :class="tileColor(i).tile"
+          :class="t.style.tile"
         >
           <div class="flex h-6 items-center justify-between">
             <DropdownMenu v-if="isOwner">
-              <DropdownMenuTrigger class="truncate text-[13px] font-semibold">{{ p.name }}</DropdownMenuTrigger>
+              <DropdownMenuTrigger class="truncate text-[13px] font-semibold">{{ t.p.name }}</DropdownMenuTrigger>
               <DropdownMenuContent align="start" class="w-40">
-                <DropdownMenuItem @click="openRenameParticipant(p.id, p.name)">Rename</DropdownMenuItem>
-                <DropdownMenuItem variant="destructive" @click="openDeleteParticipant(p.id, p.name)">Delete</DropdownMenuItem>
+                <DropdownMenuItem @click="openRenameParticipant(t.p.id, t.p.name)">Rename</DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" @click="openDeleteParticipant(t.p.id, t.p.name)">Delete</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <span v-else class="truncate text-[13px] font-semibold">{{ p.name }}</span>
+            <span v-else class="truncate text-[13px] font-semibold">{{ t.p.name }}</span>
             <button
-              class="-mr-1.5 flex size-8 items-center justify-center disabled:opacity-50"
+              class="-mr-2.5 flex size-10 items-center justify-center disabled:opacity-50"
               :disabled="!canEdit"
               aria-label="Toggle priority"
-              @click="togglePriority(cat.key, p.id)"
+              @click="togglePriority(cat.key, t.p.id)"
             >
-              <Star class="size-4" :fill="hasPriority(cat.key, p.id) ? 'currentColor' : 'none'" />
+              <Star :class="t.style.star" :fill="t.starred ? 'currentColor' : 'none'" />
             </button>
           </div>
           <div class="flex items-start gap-1">
-            <span class="text-4xl leading-none font-extrabold tabular-nums">{{ scoreFor(cat.value, p.id) }}</span>
-            <span v-if="isCellUnsent(cat.key, p.id)" class="size-2 rounded-full bg-amber-600">
+            <span class="text-4xl leading-none font-extrabold tabular-nums">{{ scoreFor(cat.value, t.p.id) }}</span>
+            <span v-if="isCellUnsent(cat.key, t.p.id)" class="size-2 rounded-full bg-amber-600">
               <span class="sr-only">not sent yet</span>
             </span>
           </div>
           <div class="grid grid-cols-2 gap-1.5">
             <button
-              class="h-10 rounded-full bg-white/70 text-[15px] font-bold disabled:opacity-50 dark:bg-white/10"
+              class="flex h-10 items-center justify-center rounded-full disabled:opacity-50"
+              :class="t.style.down"
               :disabled="!canEdit"
-              @click="changeScore(cat.key, p.id, -1)"
-            >−1</button>
+              aria-label="Decrement"
+              @click="changeScore(cat.key, t.p.id, -1)"
+            ><ChevronDown class="size-5" :stroke-width="2.5" /></button>
             <button
-              class="h-10 rounded-full text-[15px] font-bold disabled:opacity-50"
-              :class="tileColor(i).plus"
+              class="flex h-10 items-center justify-center rounded-full disabled:opacity-50"
+              :class="t.style.up"
               :disabled="!canEdit"
-              @click="changeScore(cat.key, p.id, 1)"
-            >+1</button>
+              aria-label="Increment"
+              @click="changeScore(cat.key, t.p.id, 1)"
+            ><ChevronUp class="size-5" :stroke-width="2.5" /></button>
           </div>
         </div>
       </div>
@@ -169,7 +172,7 @@
     </div>
   </div>
 
-  <!-- Bottom bar: activity from other editors + add category -->
+  <!-- Bottom bar: activity from other editors, random pick, add category -->
   <div
     v-if="!notFound"
     class="fixed inset-x-4 z-40 flex items-center gap-2.5"
@@ -180,14 +183,38 @@
       class="h-12 min-w-0 flex-1 truncate rounded-2xl bg-primary px-3.5 text-left text-[13px] text-primary-foreground"
       @click="notify.dismiss()"
     >{{ notify.current.message }}</button>
-    <button
-      v-if="canEdit"
-      class="ml-auto flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground"
-      aria-label="Add category"
-      @click="openCreateCategory"
-    >
-      <Plus class="size-6" />
-    </button>
+    <div class="ml-auto flex gap-2.5">
+      <button
+        v-if="participants.length"
+        class="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground"
+        aria-label="Pick someone at random"
+        @click="rollPick"
+      >
+        <Dices class="size-6" />
+      </button>
+      <button
+        v-if="canEdit"
+        class="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground"
+        aria-label="Add category"
+        @click="openCreateCategory"
+      >
+        <Plus class="size-6" />
+      </button>
+    </div>
+  </div>
+
+  <!-- Random pick result, over the board; a tap anywhere closes it -->
+  <button v-if="pick.open" class="fixed inset-0 z-50 cursor-default" aria-label="Close" @click="closePick"></button>
+  <div
+    role="status"
+    aria-live="polite"
+    class="pointer-events-none fixed top-16 left-1/2 z-50 w-56 -translate-x-1/2 rounded-[22px] bg-background shadow-[0_18px_40px_rgba(24,24,27,0.22)] transition duration-200 ease-out"
+    :class="pick.open ? (pick.landed ? 'scale-105' : '') : '-translate-y-6 scale-95 opacity-0'"
+  >
+    <div class="rounded-[22px] px-4 pt-3.5 pb-4 text-center" :class="tileColor(pick.idx).tile">
+      <div class="text-xs font-bold tracking-wider uppercase opacity-75">{{ pick.landed ? 'Picked' : 'Picking…' }}</div>
+      <div class="mt-1 truncate text-[32px] leading-tight font-extrabold">{{ participants[pick.idx]?.name }}</div>
+    </div>
   </div>
 
   <!-- Create category drawer -->
@@ -225,7 +252,7 @@ import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useScoreboardsStore } from '@/stores/scoreboards'
 import { useUserStore } from '@/stores/user'
-import { MoreVertical, MoreHorizontal, Trash2, QrCode, Settings, Plus, Star } from '@lucide/vue'
+import { MoreVertical, MoreHorizontal, Trash2, QrCode, Settings, Plus, Star, ChevronUp, ChevronDown, Dices } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -246,7 +273,7 @@ import RenameParticipant from '@/drawers/RenameParticipant.vue'
 import DeleteParticipantConfirm from '@/drawers/DeleteParticipantConfirm.vue'
 import { useProfilesStore } from '@/stores/profiles'
 import { removeParticipantData as removeParticipantDataCRDT } from '@/nostrToCRDT'
-import shortId from '@/lib/utils'
+import shortId, { secureRandomIndex } from '@/lib/utils'
 import { 
   addCategory as addCategoryCRDT, 
   addScore as addScoreCRDT, 
@@ -610,17 +637,60 @@ function isCellUnsent(categoryKey: string, participantId: string): boolean {
   return s.cells.has(`${categoryKey}|${participantId}`)
 }
 
-// Tile colors by participant position; the ink keeps text contrast >= 4.5:1 on the tile in both themes
+// Tile colors by participant position: soft tile, solid (starred tile and the up button), and
+// the inverse used on a solid tile. Ink on tint keeps text contrast >= 4.5:1 in both themes.
 const TILE_COLORS = [
-  { tile: 'bg-orange-100 text-orange-800 dark:bg-orange-400/15 dark:text-orange-300', plus: 'bg-orange-800 text-white dark:bg-orange-300 dark:text-orange-950' },
-  { tile: 'bg-sky-100 text-sky-800 dark:bg-sky-400/15 dark:text-sky-300', plus: 'bg-sky-800 text-white dark:bg-sky-300 dark:text-sky-950' },
-  { tile: 'bg-green-100 text-green-800 dark:bg-green-400/15 dark:text-green-300', plus: 'bg-green-800 text-white dark:bg-green-300 dark:text-green-950' },
-  { tile: 'bg-purple-100 text-purple-800 dark:bg-purple-400/15 dark:text-purple-300', plus: 'bg-purple-800 text-white dark:bg-purple-300 dark:text-purple-950' },
-  { tile: 'bg-pink-100 text-pink-800 dark:bg-pink-400/15 dark:text-pink-300', plus: 'bg-pink-800 text-white dark:bg-pink-300 dark:text-pink-950' },
-  { tile: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-400/15 dark:text-yellow-300', plus: 'bg-yellow-800 text-white dark:bg-yellow-300 dark:text-yellow-950' },
+  { tile: 'bg-orange-100 text-orange-800 dark:bg-orange-400/15 dark:text-orange-300', solid: 'bg-orange-800 text-white dark:bg-orange-300 dark:text-orange-950', onSolid: 'bg-white text-orange-800 dark:bg-orange-950 dark:text-orange-300' },
+  { tile: 'bg-sky-100 text-sky-800 dark:bg-sky-400/15 dark:text-sky-300', solid: 'bg-sky-800 text-white dark:bg-sky-300 dark:text-sky-950', onSolid: 'bg-white text-sky-800 dark:bg-sky-950 dark:text-sky-300' },
+  { tile: 'bg-green-100 text-green-800 dark:bg-green-400/15 dark:text-green-300', solid: 'bg-green-800 text-white dark:bg-green-300 dark:text-green-950', onSolid: 'bg-white text-green-800 dark:bg-green-950 dark:text-green-300' },
+  { tile: 'bg-purple-100 text-purple-800 dark:bg-purple-400/15 dark:text-purple-300', solid: 'bg-purple-800 text-white dark:bg-purple-300 dark:text-purple-950', onSolid: 'bg-white text-purple-800 dark:bg-purple-950 dark:text-purple-300' },
+  { tile: 'bg-pink-100 text-pink-800 dark:bg-pink-400/15 dark:text-pink-300', solid: 'bg-pink-800 text-white dark:bg-pink-300 dark:text-pink-950', onSolid: 'bg-white text-pink-800 dark:bg-pink-950 dark:text-pink-300' },
+  { tile: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-400/15 dark:text-yellow-300', solid: 'bg-yellow-800 text-white dark:bg-yellow-300 dark:text-yellow-950', onSolid: 'bg-white text-yellow-800 dark:bg-yellow-950 dark:text-yellow-300' },
 ]
 function tileColor(index: number) {
   return TILE_COLORS[index % TILE_COLORS.length]
+}
+
+// The starred tile of a category turns solid so it stands out
+function tilesFor(categoryKey: string) {
+  return participants.value.map((p, i) => {
+    const c = tileColor(i)
+    const starred = hasPriority(categoryKey, p.id)
+    const style = starred
+      ? { tile: c.solid, star: 'size-6 text-amber-300 dark:text-inherit', down: 'bg-white/20 dark:bg-black/15', up: c.onSolid }
+      : { tile: c.tile, star: 'size-[22px]', down: 'bg-white/70 dark:bg-white/10', up: c.solid }
+    return { p, starred, style }
+  })
+}
+
+// Random pick: one participant, each with probability 1/N; names spin ~700 ms, each step ~20% slower
+const SPIN_MS = [12, 14, 17, 21, 25, 30, 36, 43, 52, 62, 74, 89, 107, 128]
+const pick = ref({ open: false, landed: false, idx: 0 })
+let pickTimer: ReturnType<typeof setTimeout> | undefined
+function rollPick() {
+  const n = participants.value.length
+  const chosen = secureRandomIndex(n)
+  // Start so that the last spin step lands on the chosen one
+  const start = (((chosen - SPIN_MS.length) % n) + n) % n
+  let step = 0
+  clearTimeout(pickTimer)
+  pick.value = { open: true, landed: false, idx: start }
+  const next = () => {
+    if (step === SPIN_MS.length) {
+      pick.value.landed = true
+      return
+    }
+    pickTimer = setTimeout(() => {
+      step++
+      pick.value.idx = (start + step) % n
+      next()
+    }, SPIN_MS[step])
+  }
+  next()
+}
+function closePick() {
+  clearTimeout(pickTimer)
+  pick.value.open = false
 }
 
 function scoreFor(cat: any, participantId: string): number {
@@ -778,6 +848,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  clearTimeout(pickTimer)
   if (unsubCRDT) { try { unsubCRDT() } catch {}; unsubCRDT = null }
   if (unsubBRD) { try { unsubBRD() } catch {}; unsubBRD = null }
   window.removeEventListener('online', subscribeBoardCRDT)

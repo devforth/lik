@@ -56,8 +56,8 @@ for (const name of ['Dishes', 'Homework']) {
   await page.waitForTimeout(400)
 }
 // Homework is newest -> on top. Scores: Bob +3/-1 in Homework, Alice +2, Dishes Bob +1
-const inc = (i) => page.getByRole('button', { name: '+1' }).nth(i).click()
-const dec = (i) => page.getByRole('button', { name: '−1' }).nth(i).click()
+const inc = (i) => page.getByRole('button', { name: 'Increment' }).nth(i).click()
+const dec = (i) => page.getByRole('button', { name: 'Decrement' }).nth(i).click()
 await inc(0); await inc(0); await inc(0); await dec(0)
 await inc(1); await inc(1)
 await inc(2)
